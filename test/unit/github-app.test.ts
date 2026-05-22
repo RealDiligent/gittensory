@@ -1,0 +1,121 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createOrUpdateCheckRun } from "../../src/github/app";
+import type { Advisory } from "../../src/types";
+import { createTestEnv } from "../helpers/d1";
+
+describe("GitHub check runs", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("creates a completed Gittensory check run with an installation token", async () => {
+    const privateKey = await generatePrivateKeyPem();
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      calls.push(url);
+      if (url.includes("/access_tokens")) {
+        return Response.json({ token: "installation-token" });
+      }
+      if (url.includes("/commits/abc123/check-runs")) {
+        return Response.json({ total_count: 0, check_runs: [] });
+      }
+      if (url.includes("/check-runs")) {
+        const body = JSON.parse(String(init?.body)) as { name: string; conclusion: string; output: { text: string } };
+        expect(body.name).toBe("Gittensory");
+        expect(body.conclusion).toBe("neutral");
+        expect(body.output.text).not.toMatch(/reward|farming/i);
+        return Response.json({ id: 42, html_url: "https://github.com/checks/42" }, { status: 201 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: privateKey });
+    const advisory: Advisory = {
+      id: "advisory-1",
+      targetType: "pull_request",
+      targetKey: "JSONbored/gittensory#1",
+      repoFullName: "JSONbored/gittensory",
+      pullNumber: 1,
+      headSha: "abc123",
+      conclusion: "neutral",
+      severity: "warning",
+      title: "Gittensory advisory needs review",
+      summary: "1 advisory finding generated.",
+      findings: [
+        {
+          code: "missing_linked_issue",
+          title: "No linked issue detected",
+          severity: "warning",
+          detail: "No closing reference was found.",
+        },
+      ],
+      generatedAt: "2026-05-22T00:00:00.000Z",
+    };
+
+    const result = await createOrUpdateCheckRun(env, 123, "JSONbored/gittensory", advisory);
+
+    expect(result?.id).toBe(42);
+    expect(calls.some((url) => url.includes("/app/installations/123/access_tokens"))).toBe(true);
+    expect(calls.some((url) => url.includes("/repos/JSONbored/gittensory/check-runs"))).toBe(true);
+  });
+
+  it("updates an existing Gittensory check run for the same head SHA", async () => {
+    const privateKey = await generatePrivateKeyPem();
+    const methods: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      methods.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/access_tokens")) {
+        return Response.json({ token: "installation-token" });
+      }
+      if (url.includes("/commits/abc123/check-runs")) {
+        return Response.json({ total_count: 1, check_runs: [{ id: 42, name: "Gittensory" }] });
+      }
+      if (url.includes("/check-runs/42")) {
+        const body = JSON.parse(String(init?.body)) as { name: string; conclusion: string };
+        expect(body.name).toBe("Gittensory");
+        expect(body.conclusion).toBe("success");
+        return Response.json({ id: 42, html_url: "https://github.com/checks/42" });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: privateKey });
+    const advisory: Advisory = {
+      id: "advisory-2",
+      targetType: "pull_request",
+      targetKey: "JSONbored/gittensory#1",
+      repoFullName: "JSONbored/gittensory",
+      pullNumber: 1,
+      headSha: "abc123",
+      conclusion: "success",
+      severity: "info",
+      title: "Gittensory advisory passed",
+      summary: "Pull request advisory generated.",
+      findings: [],
+      generatedAt: "2026-05-22T00:00:00.000Z",
+    };
+
+    const result = await createOrUpdateCheckRun(env, 123, "JSONbored/gittensory", advisory);
+
+    expect(result?.id).toBe(42);
+    expect(methods.some((call) => call.startsWith("PATCH ") && call.includes("/check-runs/42"))).toBe(true);
+  });
+});
+
+async function generatePrivateKeyPem(): Promise<string> {
+  const key = (await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const exported = await crypto.subtle.exportKey("pkcs8", key.privateKey);
+  const base64 = Buffer.from(exported as ArrayBuffer).toString("base64").replace(/(.{64})/g, "$1\n");
+  return `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----`;
+}

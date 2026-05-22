@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gittensory-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "GITHUB_APP_ID": "0",
+    "GITHUB_APP_SLUG": "gittensory",
+    "GITTENSOR_REGISTRY_URL": "https://raw.githubusercontent.com/entrius/gittensor/test/gittensor/validator/weights/master_repositories.json",
+    "PUBLIC_API_ORIGIN": "http://localhost:8787",
+    "INTERNAL_JOB_TOKEN": "dev-internal-token"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gittensory",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOBS",
+        "queue": "gittensory-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "gittensory-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  }
+}
