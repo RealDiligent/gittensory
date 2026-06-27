@@ -735,11 +735,13 @@ describe("queue processors", () => {
     expect(mergeAudit?.n).toBe(0);
   });
 
-  it("#1: the block-mode re-gate sweep reuses a cached AI review for the same head SHA — no AI call re-spent", async () => {
+  it("#1: the block-mode re-gate sweep replays cached AI findings before gate evaluation", async () => {
     let aiCalls = 0;
     const env = createTestEnv({
       GITHUB_APP_PRIVATE_KEY: await generatePrivateKeyPem(),
       AI: { run: async () => { aiCalls += 1; return { response: JSON.stringify({ assessment: "Critical defect found.", blockers: ["x"], nits: [], suggestions: [] }) }; } } as unknown as Ai,
+      AI_SUMMARIES_ENABLED: "true",
+      AI_PUBLIC_COMMENTS_ENABLED: "true",
       AI_DAILY_NEURON_BUDGET: "100000",
     });
     await upsertInstallation(env, { action: "created", installation: { id: 9001, account: { login: "owner", id: 1, type: "Organization" }, target_type: "Organization", repository_selection: "selected", permissions: {}, events: [] } });
@@ -748,7 +750,11 @@ describe("queue processors", () => {
     await upsertPullRequestFromGitHub(env, "owner/agent-repo", { number: 7, title: "Stale PR", state: "open", user: { login: "contributor" }, head: { sha: "a7" }, labels: [], body: "Closes #1" });
     await upsertPullRequestFile(env, { repoFullName: "owner/agent-repo", pullNumber: 7, path: "src/a.ts", status: "modified", additions: 1, deletions: 0, changes: 1, payload: { patch: "@@\n+export const ok = value.length;" } });
     // Pre-seed the AI review for this exact head SHA + mode → the sweep's block-mode review must reuse it, not re-run.
-    await putCachedAiReview(env, "owner/agent-repo", 7, "a7", "block", { notes: "cached review", reviewerCount: 2 });
+    await putCachedAiReview(env, "owner/agent-repo", 7, "a7", "block", {
+      notes: "cached review",
+      reviewerCount: 2,
+      findings: [{ code: "ai_consensus_defect", severity: "critical", title: "Cached defect", detail: "Cached critical defect." }],
+    });
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
       if (url.includes("/access_tokens")) return Response.json({ token: "installation-token" });
@@ -768,6 +774,10 @@ describe("queue processors", () => {
     await sweepAndDrainPerPr(env, "owner/agent-repo");
 
     expect(aiCalls).toBe(0); // the cached AI review was reused — the LLM was never called for this head SHA
+    const blocker = await env.DB.prepare("select blocker_codes_json from gate_outcomes where repo_full_name = ? and pull_number = ? order by rowid desc limit 1").bind("owner/agent-repo", 7).first<{ blocker_codes_json: string }>();
+    expect(blocker?.blocker_codes_json).toContain("ai_consensus_defect");
+    const mergeAudit = await env.DB.prepare("select count(*) as n from audit_events where event_type = ? and detail like ?").bind("agent.action.merge", "%merged%").first<{ n: number }>();
+    expect(mergeAudit?.n).toBe(0);
   });
 
   it("posts the 🟪 reviewing placeholder before the AI review runs, then overwrites it with the verdict (#reviewing-placeholder)", async () => {
