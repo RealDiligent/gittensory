@@ -190,6 +190,87 @@ describe("GitHub check runs", () => {
     expect(mints).toBe(1);
   });
 
+  it("REGRESSION (#2453): evicts a rejected App JWT and retries the mint once instead of failing outright", async () => {
+    // Unlike installation tokens (evicted + retried once by withInstallationTokenRetry), the App JWT itself had
+    // no eviction path before #2453: mintInstallationToken threw straight through on the first non-ok response,
+    // with no retry attempt at all, leaving the poisoned JWT cached for up to APP_JWT_REUSE_MS (8 min) and
+    // failing every installation-token mint on the instance in the meantime. Before this fix, mintCalls would be
+    // 1 and the overall call would reject; after it, exactly one retry recovers the mint.
+    const privateKey = await generatePrivateKeyPem();
+    let mintCalls = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/access_tokens")) {
+        mintCalls += 1;
+        if (mintCalls === 1) return Response.json({ message: "Bad credentials" }, { status: 401 });
+        return Response.json({ token: "fresh-installation-token", expires_at: new Date(Date.now() + 60 * 60_000).toISOString() });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: privateKey });
+    await expect(createInstallationToken(env, 777)).resolves.toBe("fresh-installation-token");
+    expect(mintCalls).toBe(2); // exactly one bounded retry, not zero (old behavior) or unbounded
+  });
+
+  it("REGRESSION (#2453): does not infinite-loop when the retried App JWT is ALSO rejected", async () => {
+    const privateKey = await generatePrivateKeyPem();
+    let mintCalls = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/access_tokens")) {
+        mintCalls += 1;
+        return Response.json({ message: "Bad credentials" }, { status: 401 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: privateKey });
+    await expect(createInstallationToken(env, 777)).rejects.toThrow(/Failed to create GitHub installation token \(401\)/);
+    expect(mintCalls).toBe(2); // bounded to exactly one retry, never an unbounded loop
+  });
+
+  it("REGRESSION (#2453, second pass — flagged by the gate's own review): evicts the App JWT again when the RETRIED JWT is ALSO rejected, so the NEXT mint attempt does not replay the poisoned JWT", async () => {
+    // createAppJwt caches optimistically (before the POST proves the JWT valid). Without a second eviction, the
+    // just-rejected retry JWT from the FIRST createInstallationToken call would sit in the cache and get replayed
+    // by a SECOND, independent createInstallationToken call — still failing every mint fleet-wide for up to
+    // APP_JWT_REUSE_MS, exactly the bug the eviction-on-401 fix exists to prevent. Fake timers advance the clock a
+    // few seconds between the two top-level calls (still far inside the 8-minute reuse window) so a genuinely
+    // fresh sign produces a different iat and a different Authorization header — RS256 signs an identical JWT for
+    // an identical iat/exp within the same second, so comparing headers without advancing the clock would be
+    // flaky (a false pass could occur even without eviction, purely from a same-second coincidence).
+    vi.useFakeTimers();
+    try {
+      const privateKey = await generatePrivateKeyPem();
+      const authHeaders: string[] = [];
+      let mintCalls = 0;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+        if (url.includes("/access_tokens")) {
+          mintCalls += 1;
+          authHeaders.push(new Headers(init?.headers).get("authorization") ?? "");
+          if (mintCalls <= 2) return Response.json({ message: "Bad credentials" }, { status: 401 });
+          return Response.json({ token: "recovered-token", expires_at: new Date(Date.now() + 60 * 60_000).toISOString() });
+        }
+        return new Response("not found", { status: 404 });
+      });
+
+      const env = createTestEnv({ GITHUB_APP_PRIVATE_KEY: privateKey });
+      await expect(createInstallationToken(env, 777)).rejects.toThrow(/Failed to create GitHub installation token \(401\)/);
+      expect(mintCalls).toBe(2);
+      const retryHeader = authHeaders[1];
+
+      await vi.advanceTimersByTimeAsync(5_000); // still well inside APP_JWT_REUSE_MS (8 min) — isolates eviction, not TTL expiry
+      await expect(createInstallationToken(env, 777)).resolves.toBe("recovered-token");
+      expect(mintCalls).toBe(3);
+      // If the retry-rejected JWT had NOT been evicted, this third call would replay the cached (still within its
+      // reuse window) poisoned JWT, producing the SAME Authorization header as the retry above.
+      expect(authHeaders[2]).not.toBe(retryHeader);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("expires a rejected cached installation token and retries check-run publication once", async () => {
     const privateKey = await generatePrivateKeyPem();
     let mints = 0;
