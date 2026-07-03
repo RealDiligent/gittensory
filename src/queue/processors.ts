@@ -375,7 +375,9 @@ import {
   buildReviewGroundingText,
   checkSummaryText as checkFailureSummaryText,
   isGroundingEnabled,
+  makeGithubFileFetcher,
 } from "../review/grounding-wire";
+import type { FileFetcher } from "../review/review-grounding";
 import {
   attributeReviewRagTelemetry,
   buildReviewRagContextWithMetrics,
@@ -5467,6 +5469,9 @@ export function buildAiReviewDiff(
  * Build the complete inline patch corpus for deterministic secret scanning. Unlike {@link buildAiReviewDiff},
  * this is intentionally unbudgeted and does not reorder files or drop hunks: security controls must inspect
  * every raw patch GitHub returned instead of the lossy AI-review prompt view.
+ *
+ * GitHub omits inline `patch` for binary/large files; {@link enrichSecretScanFilesWithPatchFallback} recovers
+ * scannable `+` lines for those files before this runs (see {@link maybeAddSecretLeakFinding}).
  */
 export function buildSecretScanDiff(
   files: Awaited<ReturnType<typeof listPullRequestFiles>>,
@@ -5481,6 +5486,79 @@ export function buildSecretScanDiff(
     })
     .join("\n\n")
     .trim();
+}
+
+/** Per-file cap when synthesizing a patch for GitHub's patch-less (binary/large) PR files. */
+const SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS = 512_000;
+
+/** Lines present in `head` but not in `base` (multiset), for scanning only the additions on a modified file. */
+export function addedLinesForSecretScan(base: string, head: string): string[] {
+  const baseCounts = new Map<string, number>();
+  for (const line of base.split("\n")) {
+    baseCounts.set(line, (baseCounts.get(line) ?? 0) + 1);
+  }
+  const added: string[] = [];
+  for (const line of head.split("\n")) {
+    const remaining = baseCounts.get(line) ?? 0;
+    if (remaining > 0) {
+      baseCounts.set(line, remaining - 1);
+    } else {
+      added.push(line);
+    }
+  }
+  return added;
+}
+
+function syntheticSecretScanPatch(lines: readonly string[]): string {
+  return lines.map((line) => `+${line}`).join("\n");
+}
+
+/** When GitHub omits inline `patch` (binary/large files), fetch post-change content and synthesize `+` lines so
+ *  the unconditional `secret_leak` hard blocker can still inspect committed credentials. Added/renamed files scan
+ *  the full head content; modified files scan only multiset-added lines vs base when `baseSha` is known. */
+export async function enrichSecretScanFilesWithPatchFallback(
+  files: Awaited<ReturnType<typeof listPullRequestFiles>>,
+  args: {
+    headSha?: string | null | undefined;
+    baseSha?: string | null | undefined;
+    fetcher: FileFetcher;
+  },
+): Promise<Awaited<ReturnType<typeof listPullRequestFiles>>> {
+  const headSha = args.headSha?.trim();
+  if (!headSha) return files;
+  return Promise.all(
+    files.map(async (file) => {
+      const existingPatch = typeof file.payload?.patch === "string" ? file.payload.patch : "";
+      if (existingPatch) return file;
+      const status = file.status ?? "modified";
+      if (status === "removed") return file;
+      const headContent = await args.fetcher.getFileContent(
+        file.path,
+        headSha,
+        SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
+      );
+      if (!headContent) return file;
+      let addedLines: string[];
+      if (status === "added" || status === "renamed") {
+        addedLines = headContent.split("\n");
+      } else if (status === "modified" && args.baseSha?.trim()) {
+        const baseContent =
+          (await args.fetcher.getFileContent(
+            file.path,
+            args.baseSha.trim(),
+            SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
+          )) ?? "";
+        addedLines = addedLinesForSecretScan(baseContent, headContent);
+      } else {
+        return file;
+      }
+      if (addedLines.length === 0) return file;
+      return {
+        ...file,
+        payload: { ...file.payload, patch: syntheticSecretScanPatch(addedLines) },
+      };
+    }),
+  );
 }
 
 /**
@@ -6034,6 +6112,9 @@ export async function maybeAddSecretLeakFinding(
     repoFullName: string;
     pullNumber: number;
     files: Awaited<ReturnType<typeof listPullRequestFiles>> | null;
+    installationId?: number | null | undefined;
+    headSha?: string | null | undefined;
+    baseSha?: string | null | undefined;
   },
 ): Promise<void> {
   // UNCONDITIONAL (#audit-3.4): a CONCRETE, real-format committed credential (github_token, aws_access_key, …)
@@ -6044,7 +6125,16 @@ export async function maybeAddSecretLeakFinding(
     const files =
       args.files ??
       (await listPullRequestFiles(env, args.repoFullName, args.pullNumber));
-    const finding = secretLeakFinding(buildSecretScanDiff(files));
+    let scanFiles = files;
+    if (args.headSha) {
+      const fetcher = await makeGithubFileFetcher(env, args.repoFullName, args.installationId);
+      scanFiles = await enrichSecretScanFilesWithPatchFallback(files, {
+        headSha: args.headSha,
+        baseSha: args.baseSha,
+        fetcher,
+      });
+    }
+    const finding = secretLeakFinding(buildSecretScanDiff(scanFiles));
     if (finding) args.advisory.findings.push(finding);
   } catch (error) {
     /* v8 ignore next -- fail-safe: a file-load error never destabilizes the gate. */
@@ -7442,6 +7532,9 @@ async function maybePublishPrPublicSurface(
       repoFullName,
       pullNumber: pr.number,
       files: await getReviewFiles(),
+      installationId,
+      headSha: advisory.headSha,
+      baseSha: webhook.baseSha ?? null,
     });
 
     // Lockfile-tamper-risk scan (#2563): opt-in via `lockfileIntegrityGateMode` (default off — the scan is
