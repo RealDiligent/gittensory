@@ -106,6 +106,11 @@ function formatSecretKindsFromText(text: string): string[] {
   return kinds;
 }
 
+/** True for unified-diff file headers (`+++ b/path`, `--- a/path`), not added content like `+++const`. */
+function isUnifiedDiffFileHeaderLine(line: string): boolean {
+  return /^(?:\+\+\+|---) (?:[ab]\/|\/dev/null)/.test(line);
+}
+
 /** Scan a PR diff for secret kinds introduced on added lines (and added/renamed file headers). Per-line regex
  *  first; then a bounded cross-line join of consecutive added lines' adjacent string literals (#2454) so a
  *  credential split across `const a = "AKIA…"; const b = "REST";` still trips the unconditional gate. Context,
@@ -133,13 +138,15 @@ export function scanPrDiffForSecretKinds(diff: string): string[] {
       }
       continue;
     }
-    if (/^@@ /.test(line)) {
+    if (line.startsWith("@@")) {
       inHunk = true;
       previousLiterals = [];
       continue;
     }
-    if (line.startsWith("+") && !line.startsWith("+++")) {
+    if (line.startsWith("+")) {
       if (!inFileSection) continue;
+      // Skip pre-hunk file headers only; inside a hunk `+++…` is added content, not a header.
+      if (!inHunk && isUnifiedDiffFileHeaderLine(line)) continue;
       const content = line.slice(1);
       addedLines.push(content);
       let matched = false;

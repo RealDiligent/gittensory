@@ -239,4 +239,35 @@ describe("scanPrDiffForSecretKinds — cross-line split credentials (#2454)", ()
     ].join("\n");
     expect(scanPrDiffForSecretKinds(diff)).toEqual(["aws_access_key"]);
   });
+
+  it("scans in-hunk added content that begins with ++ (rendered +++…)", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const diff = [
+      "### src/config.ts (modified) +1/-0",
+      "@@ -1,0 +1,1 @@",
+      `+++const token = "${fakeToken}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toContain("github_token");
+  });
+
+  it("skips unified-diff file headers before the first hunk", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const diff = [
+      "### src/config.ts (modified) +1/-0",
+      "+++ b/src/config.ts",
+      "--- a/src/config.ts",
+      "@@ -1,0 +1,1 @@",
+      "+const ok = 1;",
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toEqual([]);
+    expect(
+      scanPrDiffForSecretKinds(
+        [
+          "### src/config.ts (modified) +1/-0",
+          "+++ b/src/config.ts",
+          `+const token = "${fakeToken}";`,
+        ].join("\n"),
+      ),
+    ).toContain("github_token");
+  });
 });
