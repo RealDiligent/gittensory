@@ -229,6 +229,48 @@ describe("scanPrDiffForSecretKinds — cross-line split credentials (#2454)", ()
     expect(scanPrDiffForSecretKinds(diff)).toContain("generic_secret_assignment");
   });
 
+  it("does not join generic keyword and value across context, removed, hunk, or file boundaries", () => {
+    const fakeSecret = "sk_live_" + "aK9xQ2mZw7Ln4Rv8Pt3Bh6";
+
+    const contextSplit = [
+      "### src/config.ts (modified) +2/-0",
+      "@@",
+      "+client_secret =",
+      " const unrelated = 1;",
+      `+"${fakeSecret}"`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(contextSplit)).not.toContain("generic_secret_assignment");
+
+    const removedSplit = [
+      "### src/config.ts (modified) +2/-0",
+      "@@",
+      "+client_secret =",
+      "-const gone = 1;",
+      `+"${fakeSecret}"`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(removedSplit)).not.toContain("generic_secret_assignment");
+
+    const hunkSplit = [
+      "### src/config.ts (modified) +2/-0",
+      "@@ -1,0 +1,1 @@",
+      "+client_secret =",
+      "@@ -10,0 +11,1 @@",
+      `+"${fakeSecret}"`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(hunkSplit)).not.toContain("generic_secret_assignment");
+
+    const fileSplit = [
+      "### src/a.ts (modified) +1/-0",
+      "@@",
+      "+client_secret =",
+      "",
+      "### src/b.ts (modified) +1/-0",
+      "@@",
+      `+"${fakeSecret}"`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(fileSplit)).not.toContain("generic_secret_assignment");
+  });
+
   it("does not double-join when the first added line already matches on its own", () => {
     const fakeAwsKey = awsKeyFragmentA + awsKeyFragmentB;
     const diff = [

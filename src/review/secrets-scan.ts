@@ -106,7 +106,8 @@ function formatSecretKindsFromText(text: string): string[] {
   return kinds;
 }
 
-/** True for unified-diff file headers (`+++ b/path`, `--- a/path`), not added content like `+++const`. */
+/** True for unified-diff file headers (`+++ b/path`, `--- a/path`), not added content like `+++const`.
+ *  Mirrors review-enrichment/src/analyzers/diff-lines.ts `isDiffFileHeaderLine`. */
 function isUnifiedDiffFileHeaderLine(line: string): boolean {
   return /^(?:\+\+\+|---) (?:[ab]\/|\/dev\/null)/.test(line);
 }
@@ -114,25 +115,37 @@ function isUnifiedDiffFileHeaderLine(line: string): boolean {
 /** Scan a PR diff for secret kinds introduced on added lines (and added/renamed file headers). Per-line regex
  *  first; then a bounded cross-line join of consecutive added lines' adjacent string literals (#2454) so a
  *  credential split across `const a = "AKIA…"; const b = "REST";` still trips the unconditional gate. Context,
- *  removed, and hunk boundaries reset the join window — same semantics as review-enrichment's scanPatch. */
+ *  removed, hunk, and file-section boundaries reset both the literal-join window and generic-assignment runs. */
 export function scanPrDiffForSecretKinds(diff: string): string[] {
   const found = new Set<string>();
-  const addedLines: string[] = [];
   let inFileSection = false;
   let inHunk = false;
   let previousLiterals: string[] = [];
+  let addedRun: string[] = [];
+
+  const resetJoinState = (): void => {
+    previousLiterals = [];
+    addedRun = [];
+  };
+
+  const noteGenericFromAddedRun = (): void => {
+    if (found.has("generic_secret_assignment") || addedRun.length === 0) return;
+    if (hasGenericSecretAssignment(addedRun.join("\n"))) {
+      found.add("generic_secret_assignment");
+    }
+  };
 
   for (const line of diff.split("\n")) {
     if (line === "") {
       inFileSection = false;
       inHunk = false;
-      previousLiterals = [];
+      resetJoinState();
       continue;
     }
     if (/^### .+ \(.+\) /.test(line)) {
       inFileSection = true;
       inHunk = false;
-      previousLiterals = [];
+      resetJoinState();
       if (/^### .+ \((?:added|renamed)\) /.test(line)) {
         for (const kind of formatSecretKindsFromText(line)) found.add(kind);
       }
@@ -140,7 +153,7 @@ export function scanPrDiffForSecretKinds(diff: string): string[] {
     }
     if (line.startsWith("@@")) {
       inHunk = true;
-      previousLiterals = [];
+      resetJoinState();
       continue;
     }
     if (line.startsWith("+")) {
@@ -148,12 +161,13 @@ export function scanPrDiffForSecretKinds(diff: string): string[] {
       // Skip pre-hunk file headers only; inside a hunk `+++…` is added content, not a header.
       if (!inHunk && isUnifiedDiffFileHeaderLine(line)) continue;
       const content = line.slice(1);
-      addedLines.push(content);
+      addedRun.push(content);
       let matched = false;
       for (const kind of formatSecretKindsFromText(content)) {
         found.add(kind);
         matched = true;
       }
+      noteGenericFromAddedRun();
       const currentLiterals = extractStringLiteralContents(content);
       const lastPrevious = previousLiterals.at(-1);
       const firstCurrent = currentLiterals[0];
@@ -170,16 +184,13 @@ export function scanPrDiffForSecretKinds(diff: string): string[] {
       continue;
     }
     if (line.startsWith("-")) {
-      previousLiterals = [];
+      resetJoinState();
       continue;
     }
     if (inHunk && line.startsWith(" ")) {
-      previousLiterals = [];
+      resetJoinState();
     }
   }
 
-  if (!found.has("generic_secret_assignment") && hasGenericSecretAssignment(addedLines.join("\n"))) {
-    found.add("generic_secret_assignment");
-  }
   return [...found];
 }
