@@ -75,6 +75,15 @@ describe("parseSlopOpinion", () => {
     const parsed = parseSlopOpinion(JSON.stringify({ band: "low", rationale: "ok", signals: ["real", 5, null, "two"] }));
     expect(parsed?.signals).toEqual(["real", "two"]);
   });
+
+  it("parses the verdict when a reasoning model prepends a <think> scratchpad JSON object (#accuracy-gap-3)", () => {
+    // gpt-oss/nemotron (the Workers-AI slop slots) emit a scratchpad object BEFORE the real verdict. A greedy
+    // first-`{`-to-last-`}` match spans both and JSON.parse throws → advisory silently dropped. The brace-aware
+    // extractor must return the LAST top-level object (the verdict).
+    const reasoning = `<think>\n{"scratch":"weighing intent vs diff {nested braces} here"}\n</think>\n${slopJson({ band: "high", rationale: "boilerplate not matching intent" })}`;
+    const parsed = parseSlopOpinion(reasoning);
+    expect(parsed).toMatchObject({ band: "high", rationale: "boilerplate not matching intent" });
+  });
 });
 
 describe("slopFindingFromOpinion", () => {

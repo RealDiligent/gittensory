@@ -28,6 +28,7 @@ import {
   clampNumber,
   coerceAiText,
   estimateNeurons,
+  extractLastJsonObject,
   isEnabled,
   toPublicSafe,
   utcDayStartIso,
@@ -91,13 +92,15 @@ type AiRunner = { run?: (model: string, options: Record<string, unknown>, extra?
 
 /** Parse a model's JSON slop opinion into a normalized {@link SlopOpinion}, or null when unusable. */
 export function parseSlopOpinion(text: string): SlopOpinion | null {
-  const match = text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```$/i, "")
-    .match(/\{[\s\S]*\}/);
-  if (!match) return null;
+  // Use the brace-depth-aware, string-safe extractor (shared with the AI review path). The Workers-AI slop
+  // slots are the SAME gpt-oss/nemotron reasoning models that emit a `<think>` scratchpad object BEFORE the
+  // real verdict; a greedy first-`{`-to-last-`}` match spans both objects and corrupts the parse, silently
+  // dropping the advisory. extractLastJsonObject returns the LAST complete top-level object (the verdict),
+  // matching parseModelReview. (#accuracy-gap-3)
+  const jsonText = extractLastJsonObject(text);
+  if (!jsonText) return null;
   try {
-    const obj = JSON.parse(match[0]) as Record<string, unknown>;
+    const obj = JSON.parse(jsonText) as Record<string, unknown>;
     if (!isSlopBand(obj.band)) return null;
     const rationale = typeof obj.rationale === "string" ? obj.rationale.trim().slice(0, 400) : "";
     const signals = Array.isArray(obj.signals)
