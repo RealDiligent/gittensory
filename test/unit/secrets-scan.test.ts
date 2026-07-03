@@ -173,4 +173,70 @@ describe("scanPrDiffForSecretKinds — cross-line split credentials (#2454)", ()
     const diff = `### secrets.env (modified) +1/-0\n+const token = "${fakeToken}";`;
     expect(scanPrDiffForSecretKinds(diff)).toContain("github_token");
   });
+
+  it("flags secrets embedded in added/renamed file path headers", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const added = `### fixtures/${fakeToken}.txt (added) +1/-0\n+clean content`;
+    const renamed = `### fixtures/${fakeToken}.txt (renamed) +0/-0\n+clean content`;
+    expect(scanPrDiffForSecretKinds(added)).toContain("github_token");
+    expect(scanPrDiffForSecretKinds(renamed)).toContain("github_token");
+  });
+
+  it("ignores orphan + lines that appear before any file header", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    expect(scanPrDiffForSecretKinds(`+const token = "${fakeToken}";`)).toEqual([]);
+  });
+
+  it("resets cross-line join state across blank lines between file sections", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const diff = [
+      "### src/a.ts (modified) +1/-0",
+      `+const part1 = "${awsKeyFragmentA}";`,
+      "",
+      "### src/b.ts (modified) +1/-0",
+      `+const part2 = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).not.toContain("aws_access_key");
+    expect(
+      scanPrDiffForSecretKinds(
+        [
+          "### src/b.ts (modified) +1/-0",
+          `+const token = "${fakeToken}";`,
+        ].join("\n"),
+      ),
+    ).toContain("github_token");
+  });
+
+  it("resets cross-line join state when a removed line breaks the added-line run", () => {
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@ -1,0 +1,2 @@",
+      `+const part1 = "${awsKeyFragmentA}";`,
+      "-const removed = 1;",
+      `+const part2 = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).not.toContain("aws_access_key");
+  });
+
+  it("recovers generic_secret_assignment when keyword and value span adjacent added lines", () => {
+    const fakeSecret = "sk_live_" + "aK9xQ2mZw7Ln4Rv8Pt3Bh6";
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@",
+      "+client_secret =",
+      `+"${fakeSecret}"`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toContain("generic_secret_assignment");
+  });
+
+  it("does not double-join when the first added line already matches on its own", () => {
+    const fakeAwsKey = awsKeyFragmentA + awsKeyFragmentB;
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@",
+      `+const key = "${fakeAwsKey}";`,
+      `+const tail = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toEqual(["aws_access_key"]);
+  });
 });
