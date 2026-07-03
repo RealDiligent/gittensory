@@ -626,7 +626,64 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
     });
     expect(enriched[0]?.payload.patch).toBeUndefined();
     expect(enriched[0]?.payload.secretScanIncomplete).toBe(true);
-    expect(incompletePatchLessSecretScanFinding(enriched)?.title).toContain("secrets.env");
+    expect(incompletePatchLessSecretScanFinding(enriched)?.detail).toContain("secrets.env");
+  });
+
+  it("does not mark a patch-less added file incomplete when head content is an empty string", async () => {
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path === "empty.txt" && ref === "head-sha") return "";
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "empty.txt",
+        status: "added",
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      fetcher,
+    });
+    expect(enriched[0]?.payload.secretScanIncomplete).toBeUndefined();
+    expect(incompletePatchLessSecretScanFinding(enriched)).toBeNull();
+  });
+
+  it("scans a patch-less modified file when base content is an empty string", async () => {
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path !== "src/config.ts") return null;
+        if (ref === "base-sha") return "";
+        if (ref === "head-sha") return `const token = "${fakeToken}";\n`;
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "src/config.ts",
+        status: "modified",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      baseSha: "base-sha",
+      fetcher,
+    });
+    expect(enriched[0]?.payload.secretScanIncomplete).toBeUndefined();
+    expect(secretLeakFinding(buildSecretScanDiff(enriched))?.code).toBe("secret_leak");
   });
 
   it("returns null from incompletePatchLessSecretScanFinding when every file scanned completely", () => {

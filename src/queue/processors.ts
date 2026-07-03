@@ -5602,7 +5602,7 @@ export async function enrichSecretScanFilesWithPatchFallback(
           headSha,
           SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
         );
-        if (!headContent) return markPatchLessSecretScanIncomplete(file);
+        if (headContent == null) return markPatchLessSecretScanIncomplete(file);
         if (isOverSecretScanContentLimit(headContent)) return markPatchLessSecretScanIncomplete(file);
         let addedLines: string[];
         if (status === "added") {
@@ -5615,7 +5615,7 @@ export async function enrichSecretScanFilesWithPatchFallback(
             baseSha,
             SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
           );
-          if (!baseContent) return markPatchLessSecretScanIncomplete(file);
+          if (baseContent == null) return markPatchLessSecretScanIncomplete(file);
           if (isOverSecretScanContentLimit(baseContent)) return markPatchLessSecretScanIncomplete(file);
           addedLines = addedLinesForSecretScan(baseContent, headContent);
         } else {
@@ -5624,7 +5624,7 @@ export async function enrichSecretScanFilesWithPatchFallback(
             args.baseSha!.trim(),
             SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
           );
-          if (!baseContent) return markPatchLessSecretScanIncomplete(file);
+          if (baseContent == null) return markPatchLessSecretScanIncomplete(file);
           if (isOverSecretScanContentLimit(baseContent)) return markPatchLessSecretScanIncomplete(file);
           addedLines = addedLinesForSecretScan(baseContent, headContent);
         }
