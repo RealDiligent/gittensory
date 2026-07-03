@@ -21,6 +21,7 @@ import {
   extractBrowserSessionToken,
   extractCookieValue,
   isAuthorizedGitHubSessionLogin,
+  isMcpReadRepoAllowed,
   isMcpReadUnscoped,
   revokeSession,
   timingSafeEqual,
@@ -1972,21 +1973,37 @@ export function createApp() {
     return c.json({ ...(await buildInstallationRepairDiagnostics(c.env, health)), refreshed: true });
   });
 
-  app.get("/v1/repos", async (c) => c.json(await listRepositories(c.env)));
+  app.get("/v1/repos", async (c) => {
+    const identity = await authenticateRequestIdentity(c);
+    const repositories = await listRepositories(c.env);
+    if (identity?.kind === "static" && identity.actor === "mcp") {
+      return c.json(
+        repositories.filter((repo) => isMcpReadRepoAllowed(c.env.MCP_READ_REPO_ALLOWLIST, repo.fullName)),
+      );
+    }
+    return c.json(repositories);
+  });
 
   app.get("/v1/repos/:owner/:repo", async (c) => {
-    const repo = await getRepository(c.env, `${c.req.param("owner")}/${c.req.param("repo")}`);
+    const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
+    const repo = await getRepository(c.env, fullName);
     if (!repo) return c.json({ error: "repo_not_found" }, 404);
     return c.json(repo);
   });
 
   app.get("/v1/repos/:owner/:repo/intelligence", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     return c.json(await buildRepoIntelligenceResponse(c.env, fullName));
   });
 
   app.get("/v1/repos/:owner/:repo/issue-quality", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const identity = await authenticateRequestIdentity(c);
     /* v8 ignore next -- Protected middleware rejects unauthenticated private routes before route-specific repo guards. */
     if (!identity) return c.json({ error: "unauthorized" }, 401);
@@ -2002,6 +2019,8 @@ export function createApp() {
 
   app.post("/v1/repos/:owner/:repo/validate-linked-issue", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const identity = await authenticateRequestIdentity(c);
     /* v8 ignore next -- Protected middleware rejects unauthenticated private routes before route-specific repo guards. */
     if (!identity) return c.json({ error: "unauthorized" }, 401);
@@ -2022,6 +2041,8 @@ export function createApp() {
 
   app.post("/v1/repos/:owner/:repo/check-before-start", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const identity = await authenticateRequestIdentity(c);
     /* v8 ignore next -- Protected middleware rejects unauthenticated private routes before route-specific repo guards. */
     if (!identity) return c.json({ error: "unauthorized" }, 401);
@@ -2043,11 +2064,15 @@ export function createApp() {
 
   app.get("/v1/repos/:owner/:repo/registration-readiness", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     return c.json(await buildRegistrationReadinessResponse(c.env, fullName));
   });
 
   app.get("/v1/repos/:owner/:repo/gittensor-config-recommendation", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     return c.json(await buildGittensorConfigRecommendationResponse(c.env, fullName));
   });
 
@@ -2415,6 +2440,8 @@ export function createApp() {
     const unauthorized = await requireStaticProtectedApiToken(c);
     if (unauthorized) return unauthorized;
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const number = Number(c.req.param("number"));
     if (!Number.isInteger(number) || number <= 0) return c.json({ error: "invalid_pull_number" }, 400);
     const [repo, pullRequest, issues, pullRequests, files, reviews, checks, recentMergedPullRequests] = await Promise.all([
@@ -2437,6 +2464,8 @@ export function createApp() {
 
   app.get("/v1/repos/:owner/:repo/pulls/:number/reviewability", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const number = Number(c.req.param("number"));
     if (!Number.isInteger(number) || number <= 0) return c.json({ error: "invalid_pull_number" }, 400);
     const [repo, pullRequest, issues, pullRequests, files, reviews, checks, recentMergedPullRequests] = await Promise.all([
@@ -2471,6 +2500,8 @@ export function createApp() {
 
   app.get("/v1/repos/:owner/:repo/outcome-patterns", async (c) => {
     const fullName = `${c.req.param("owner")}/${c.req.param("repo")}`;
+    const forbidden = await requireMcpReadRepoAccess(c, fullName);
+    if (forbidden) return forbidden;
     const response = await buildRepoOutcomePatternsResponse(c.env, fullName);
     if (!response) return c.json({ error: "repo_outcome_patterns_not_found", repoFullName: fullName }, 404);
     return c.json(response);
@@ -4858,7 +4889,7 @@ function issueQualityMap(repoFullName: string, report: IssueQualityReport | unde
 //     unless `session.actor === requestedLogin`. Being a miner grants ZERO maintainer visibility.
 //   • MAINTAINER OF A SPECIFIC REPO: may read/write maintainer data ONLY for repos it is a verified
 //     maintainer of — enforced by `requireSessionRepoAccess` / `requireRepoMaintainer` (HTTP) and
-//     `GittensoryMcp.canAccessRepo` (MCP). Maintainer-of-repo-A grants ZERO access to repo B.
+//     `GittensoryMcp.canAccessRepo` / `requireMcpReadRepoAccess` (HTTP+MCP). Maintainer-of-repo-A grants ZERO access to repo B.
 // Two maintainer tiers: (a) affiliation (owns/installed the repo, or authored a PR there with a
 // maintainer association) gates maintainer-DATA reads; (b) verified write/admin/maintain permission,
 // resolved live via the installation, additionally gates repo-visible settings writes and SECRET BYOK key
@@ -4972,6 +5003,19 @@ async function requireStaticProtectedApiToken(c: ProtectedRouteContext): Promise
   /* v8 ignore next -- Protected middleware rejects unauthenticated private routes before static-token-only route guards. */
   if (!identity) return c.json({ error: "unauthorized" }, 401);
   if (identity.kind === "session") return c.json({ error: "static_token_required" }, 403);
+  return null;
+}
+
+async function requireMcpReadRepoAccess(c: ProtectedRouteContext, repoFullName: string): Promise<Response | null> {
+  const identity = await authenticateRequestIdentity(c);
+  /* v8 ignore next -- Protected middleware rejects unauthenticated private routes before repo read guards. */
+  if (!identity) return c.json({ error: "unauthorized" }, 401);
+  // The shared, end-user-obtainable GITTENSORY_MCP_TOKEN (static `mcp` identity) must NOT read an arbitrary
+  // installed repo over HTTP — this mirrors GittensoryMcp.canAccessRepo / isMcpReadRepoAllowed (#2455). Operator-only
+  // `api`/`internal` tokens stay trusted by design.
+  if (identity.kind === "static" && identity.actor === "mcp" && !isMcpReadRepoAllowed(c.env.MCP_READ_REPO_ALLOWLIST, repoFullName)) {
+    return c.json({ error: "forbidden_repo" }, 403);
+  }
   return null;
 }
 

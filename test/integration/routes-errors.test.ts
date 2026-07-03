@@ -317,6 +317,33 @@ describe("api route guards and error branches", () => {
     await expect(wildcardDecisionPack.json()).resolves.toMatchObject({ login: "victim", summary: "private advisory summary" });
   });
 
+  it("blocks the shared MCP token from repo read routes unless the repo is MCP_READ_REPO_ALLOWLIST-scoped (#2455 HTTP repo parity)", async () => {
+    const app = createApp();
+    const scopedEnv = createTestEnv({ MCP_READ_REPO_ALLOWLIST: "owner/allowed-repo" });
+    await upsertRepositoryFromGitHub(scopedEnv, { name: "allowed-repo", full_name: "owner/allowed-repo", private: false, owner: { login: "owner" } });
+    await upsertRepositoryFromGitHub(scopedEnv, { name: "secret-repo", full_name: "owner/secret-repo", private: false, owner: { login: "owner" } });
+    const mcpHeaders = { authorization: `Bearer ${scopedEnv.GITTENSORY_MCP_TOKEN}` };
+
+    const deniedRepo = await app.request("/v1/repos/owner/secret-repo", { headers: mcpHeaders }, scopedEnv);
+    expect(deniedRepo.status).toBe(403);
+    await expect(deniedRepo.json()).resolves.toMatchObject({ error: "forbidden_repo" });
+
+    const allowedRepo = await app.request("/v1/repos/owner/allowed-repo", { headers: mcpHeaders }, scopedEnv);
+    expect(allowedRepo.status).toBe(200);
+    await expect(allowedRepo.json()).resolves.toMatchObject({ fullName: "owner/allowed-repo" });
+
+    const list = await app.request("/v1/repos", { headers: mcpHeaders }, scopedEnv);
+    expect(list.status).toBe(200);
+    const repos = (await list.json()) as Array<{ fullName: string }>;
+    expect(repos.map((repo) => repo.fullName)).toEqual(["owner/allowed-repo"]);
+
+    const deniedIntelligence = await app.request("/v1/repos/owner/secret-repo/intelligence", { headers: mcpHeaders }, scopedEnv);
+    expect(deniedIntelligence.status).toBe(403);
+
+    const operatorRepo = await app.request("/v1/repos/owner/secret-repo", { headers: apiHeaders(scopedEnv) }, scopedEnv);
+    expect(operatorRepo.status).toBe(200);
+  });
+
   it("keeps OAuth setup, CORS, and rate limits explicit", async () => {
     const app = createApp();
     const env = createTestEnv();
