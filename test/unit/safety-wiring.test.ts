@@ -626,7 +626,66 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
     expect(enriched[0]?.payload.patch).toBeUndefined();
   });
 
-  it("synthesizes a scannable patch for a patch-less renamed file", async () => {
+  it("synthesizes a scannable patch for a patch-less renamed file with a newly added secret", async () => {
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path === "old-secrets.env" && ref === "base-sha") return "const existing = 1;\n";
+        if (path === "secrets.env" && ref === "head-sha") return `const existing = 1;\nconst token = "${fakeToken}";\n`;
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        previousFilename: "old-secrets.env",
+        status: "renamed",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      baseSha: "base-sha",
+      fetcher,
+    });
+    expect(secretLeakFinding(buildSecretScanDiff(enriched))?.code).toBe("secret_leak");
+  });
+
+  it("does not flag a pure rename when the credential already existed in base", async () => {
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path === "old-secrets.env" && ref === "base-sha") return `const token = "${fakeToken}";\n`;
+        if (path === "secrets.env" && ref === "head-sha") return `const token = "${fakeToken}";\n`;
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        previousFilename: "old-secrets.env",
+        status: "renamed",
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      baseSha: "base-sha",
+      fetcher,
+    });
+    expect(enriched[0]?.payload.patch).toBeUndefined();
+    expect(secretLeakFinding(buildSecretScanDiff(enriched))).toBeNull();
+  });
+
+  it("leaves a renamed file unchanged when previous path or baseSha is unknown", async () => {
     const fetcher: FileFetcher = {
       async getFileContent(path, ref) {
         if (path === "secrets.env" && ref === "head-sha") return `const token = "${fakeToken}";\n`;
@@ -649,7 +708,7 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
       headSha: "head-sha",
       fetcher,
     });
-    expect(secretLeakFinding(buildSecretScanDiff(enriched))?.code).toBe("secret_leak");
+    expect(enriched[0]?.payload.patch).toBeUndefined();
   });
 
   it("does not inject a synthetic patch when modified head matches base (no added lines)", async () => {
@@ -680,7 +739,7 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
     expect(enriched[0]?.payload.patch).toBeUndefined();
   });
 
-  it("treats a missing base fetch as empty content when diffing modified files", async () => {
+  it("leaves a modified file unchanged when base content cannot be fetched", async () => {
     const fetcher: FileFetcher = {
       async getFileContent(path, ref) {
         if (path !== "src/config.ts") return null;
@@ -706,7 +765,35 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
       baseSha: "base-sha",
       fetcher,
     });
-    expect(secretLeakFinding(buildSecretScanDiff(enriched))?.code).toBe("secret_leak");
+    expect(enriched[0]?.payload.patch).toBeUndefined();
+    expect(secretLeakFinding(buildSecretScanDiff(enriched))).toBeNull();
+  });
+
+  it("leaves a patch-less file unchanged when fetched content exceeds the scan cap", async () => {
+    const oversized = "x".repeat(512_001);
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path === "secrets.env" && ref === "head-sha") return oversized;
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      fetcher,
+    });
+    expect(enriched[0]?.payload.patch).toBeUndefined();
   });
 
   it("leaves one patch-less file unchanged when its fetch rejects without blocking siblings", async () => {

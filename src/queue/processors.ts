@@ -5513,9 +5513,15 @@ function syntheticSecretScanPatch(lines: readonly string[]): string {
   return lines.map((line) => `+${line}`).join("\n");
 }
 
+function isOverSecretScanContentLimit(content: string): boolean {
+  return content.length > SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS;
+}
+
 /** When GitHub omits inline `patch` (binary/large files), fetch post-change content and synthesize `+` lines so
- *  the unconditional `secret_leak` hard blocker can still inspect committed credentials. Added/renamed files scan
- *  the full head content; modified files scan only multiset-added lines vs base when `baseSha` is known. */
+ *  the unconditional `secret_leak` hard blocker can still inspect committed credentials. Added files scan only
+ *  genuinely new lines; modified/renamed files multiset-diff against base when `baseSha` is known. Unfetchable,
+ *  truncated, or baseline-unknown content leaves the file header-only so pre-existing secrets are not mis-flagged.
+ */
 export async function enrichSecretScanFilesWithPatchFallback(
   files: Awaited<ReturnType<typeof listPullRequestFiles>>,
   args: {
@@ -5538,17 +5544,28 @@ export async function enrichSecretScanFilesWithPatchFallback(
           headSha,
           SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
         );
-        if (!headContent) return file;
+        if (!headContent || isOverSecretScanContentLimit(headContent)) return file;
         let addedLines: string[];
-        if (status === "added" || status === "renamed") {
+        if (status === "added") {
           addedLines = headContent.split("\n");
+        } else if (status === "renamed") {
+          const baseSha = args.baseSha?.trim();
+          const previousPath = file.previousFilename?.trim();
+          if (!baseSha || !previousPath) return file;
+          const baseContent = await args.fetcher.getFileContent(
+            previousPath,
+            baseSha,
+            SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
+          );
+          if (!baseContent || isOverSecretScanContentLimit(baseContent)) return file;
+          addedLines = addedLinesForSecretScan(baseContent, headContent);
         } else if (status === "modified" && args.baseSha?.trim()) {
-          const baseContent =
-            (await args.fetcher.getFileContent(
-              file.path,
-              args.baseSha.trim(),
-              SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
-            )) ?? "";
+          const baseContent = await args.fetcher.getFileContent(
+            file.path,
+            args.baseSha.trim(),
+            SECRET_SCAN_PATCH_FALLBACK_MAX_CHARS,
+          );
+          if (!baseContent || isOverSecretScanContentLimit(baseContent)) return file;
           addedLines = addedLinesForSecretScan(baseContent, headContent);
         } else {
           return file;
