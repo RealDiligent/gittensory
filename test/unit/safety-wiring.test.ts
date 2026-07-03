@@ -551,6 +551,28 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
     expect(enriched).toBe(files);
   });
 
+  it("returns files unchanged when headSha is blank whitespace", async () => {
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const fetcher: FileFetcher = {
+      async getFileContent() {
+        throw new Error("fetch should not run without a trimmed headSha");
+      },
+    };
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, { headSha: "   ", fetcher });
+    expect(enriched).toBe(files);
+  });
+
   it("skips files that already have an inline patch", async () => {
     const files = [
       {
@@ -731,6 +753,74 @@ describe("enrichSecretScanFilesWithPatchFallback", () => {
     });
     expect(enriched[0]?.payload.secretScanIncomplete).toBe(true);
     expect(incompletePatchLessSecretScanFinding(enriched)?.detail).toContain("secrets.env");
+  });
+
+  it("marks a renamed file incomplete when head content exceeds the scan cap", async () => {
+    const oversized = "x".repeat(512_001);
+    const fetcher: FileFetcher = {
+      async getFileContent(path, ref) {
+        if (path === "secrets.env" && ref === "head-sha") return oversized;
+        if (path === "old-secrets.env" && ref === "base-sha") return "const existing = 1;\n";
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        previousFilename: "old-secrets.env",
+        status: "renamed",
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      baseSha: "base-sha",
+      fetcher,
+    });
+    expect(enriched[0]?.payload.secretScanIncomplete).toBe(true);
+  });
+
+  it("reports every incomplete patch-less path in the finding detail", async () => {
+    const fetcher: FileFetcher = {
+      async getFileContent() {
+        return null;
+      },
+    };
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "a.env",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "b.env",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const enriched = await enrichSecretScanFilesWithPatchFallback(files, {
+      headSha: "head-sha",
+      fetcher,
+    });
+    const finding = incompletePatchLessSecretScanFinding(enriched);
+    expect(finding?.title).toContain("(2)");
+    expect(finding?.detail).toContain("a.env");
+    expect(finding?.detail).toContain("b.env");
   });
 
   it("marks a renamed file incomplete when base content cannot be fetched", async () => {

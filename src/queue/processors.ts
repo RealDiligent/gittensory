@@ -5593,7 +5593,7 @@ export async function enrichSecretScanFilesWithPatchFallback(
     async (file) => {
       const status = file.status ?? "modified";
       const existingPatch = typeof file.payload?.patch === "string" ? file.payload.patch : "";
-      if (existingPatch || status === "removed") return file;
+      if (existingPatch) return file;
       const needsFetch = shouldAttemptPatchLessSecretScan(file, status, args.baseSha);
       if (!needsFetch) return file;
       try {
