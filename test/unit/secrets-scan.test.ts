@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scanForSecrets } from "../../src/review/secrets-scan";
+import { scanForSecrets, scanPrDiffForSecretKinds } from "../../src/review/secrets-scan";
 
 describe("scanForSecrets — deterministic secret-pattern scanner", () => {
   it("returns no findings for empty / benign text", () => {
@@ -105,5 +105,72 @@ describe("scanForSecrets — deterministic secret-pattern scanner", () => {
 
   it("does NOT flag a short value under the 16-character floor", () => {
     expect(scanForSecrets('token = "short12345"').kinds).not.toContain("generic_secret_assignment");
+  });
+});
+
+describe("scanPrDiffForSecretKinds — cross-line split credentials (#2454)", () => {
+  const awsKeyFragmentA = "AKIA" + "IOSFODNN7";
+  const awsKeyFragmentB = "EXAMPLE";
+
+  it("catches an AWS key split across two adjacent added lines via string literals", () => {
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@ -1,0 +1,2 @@",
+      `+const part1 = "${awsKeyFragmentA}";`,
+      `+const part2 = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toContain("aws_access_key");
+  });
+
+  it("does not join literals across a context line inside the hunk", () => {
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@ -1,1 +1,3 @@",
+      `+const part1 = "${awsKeyFragmentA}";`,
+      ' const unrelated = "context line";',
+      `+const part2 = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).not.toContain("aws_access_key");
+  });
+
+  it("does not join literals across a hunk boundary", () => {
+    const diff = [
+      "### src/config.ts (modified) +2/-0",
+      "@@ -1,0 +1,1 @@",
+      `+const part1 = "${awsKeyFragmentA}";`,
+      "@@ -10,0 +11,1 @@",
+      `+const part2 = "${awsKeyFragmentB}";`,
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).not.toContain("aws_access_key");
+  });
+
+  it("does not join unrelated short literals into a false positive", () => {
+    const diff = [
+      "### src/app.ts (modified) +2/-0",
+      "@@ -1,0 +1,2 @@",
+      '+const a = "hello";',
+      '+const b = "world";',
+    ].join("\n");
+    expect(scanPrDiffForSecretKinds(diff)).toEqual([]);
+  });
+
+  it("still flags a single-line secret on an added line", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const diff = `### src/config.ts (modified) +1/-0\n@@\n+const token = "${fakeToken}";`;
+    expect(scanPrDiffForSecretKinds(diff)).toContain("github_token");
+  });
+
+  it("does not flag secrets on removed or context lines", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const removed = `### src/config.ts (modified) +0/-1\n@@\n-const token = "${fakeToken}";`;
+    const context = `### src/config.ts (modified) +1/-0\n@@\n const token = "${fakeToken}";\n+const unrelated = 1;`;
+    expect(scanPrDiffForSecretKinds(removed)).toEqual([]);
+    expect(scanPrDiffForSecretKinds(context)).toEqual([]);
+  });
+
+  it("scans patch-less synthetic + lines without a hunk header", () => {
+    const fakeToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const diff = `### secrets.env (modified) +1/-0\n+const token = "${fakeToken}";`;
+    expect(scanPrDiffForSecretKinds(diff)).toContain("github_token");
   });
 });

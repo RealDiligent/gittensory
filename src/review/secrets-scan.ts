@@ -90,3 +90,89 @@ export function scanForSecrets(text: string): SecretScanResult {
   if (hasGenericSecretAssignment(text)) kinds.push("generic_secret_assignment");
   return { found: kinds.length > 0, kinds };
 }
+
+/** Extract quoted string-literal inner text from one source line (for cross-line join below). */
+function extractStringLiteralContents(line: string): string[] {
+  const literals: string[] = [];
+  const re = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(line)) !== null) literals.push(match[0].slice(1, -1));
+  return literals;
+}
+
+function formatSecretKindsFromText(text: string): string[] {
+  const kinds = SECRET_PATTERNS.filter((pattern) => pattern.re.test(text)).map((pattern) => pattern.name);
+  if (hasGenericSecretAssignment(text)) kinds.push("generic_secret_assignment");
+  return kinds;
+}
+
+/** Scan a PR diff for secret kinds introduced on added lines (and added/renamed file headers). Per-line regex
+ *  first; then a bounded cross-line join of consecutive added lines' adjacent string literals (#2454) so a
+ *  credential split across `const a = "AKIA…"; const b = "REST";` still trips the unconditional gate. Context,
+ *  removed, and hunk boundaries reset the join window — same semantics as review-enrichment's scanPatch. */
+export function scanPrDiffForSecretKinds(diff: string): string[] {
+  const found = new Set<string>();
+  const addedLines: string[] = [];
+  let inFileSection = false;
+  let inHunk = false;
+  let previousLiterals: string[] = [];
+
+  for (const line of diff.split("\n")) {
+    if (line === "") {
+      inFileSection = false;
+      inHunk = false;
+      previousLiterals = [];
+      continue;
+    }
+    if (/^### .+ \(.+\) /.test(line)) {
+      inFileSection = true;
+      inHunk = false;
+      previousLiterals = [];
+      if (/^### .+ \((?:added|renamed)\) /.test(line)) {
+        for (const kind of formatSecretKindsFromText(line)) found.add(kind);
+      }
+      continue;
+    }
+    if (/^@@ /.test(line)) {
+      inHunk = true;
+      previousLiterals = [];
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      if (!inFileSection) continue;
+      const content = line.slice(1);
+      addedLines.push(content);
+      let matched = false;
+      for (const kind of formatSecretKindsFromText(content)) {
+        found.add(kind);
+        matched = true;
+      }
+      const currentLiterals = extractStringLiteralContents(content);
+      const lastPrevious = previousLiterals.at(-1);
+      const firstCurrent = currentLiterals[0];
+      if (!matched && lastPrevious !== undefined && firstCurrent !== undefined) {
+        const joined = lastPrevious + firstCurrent;
+        for (const pattern of SECRET_PATTERNS) {
+          if (pattern.re.test(joined)) {
+            found.add(pattern.name);
+            break;
+          }
+        }
+      }
+      previousLiterals = currentLiterals;
+      continue;
+    }
+    if (line.startsWith("-")) {
+      previousLiterals = [];
+      continue;
+    }
+    if (inHunk && line.startsWith(" ")) {
+      previousLiterals = [];
+    }
+  }
+
+  if (!found.has("generic_secret_assignment") && hasGenericSecretAssignment(addedLines.join("\n"))) {
+    found.add("generic_secret_assignment");
+  }
+  return [...found];
+}
