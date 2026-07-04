@@ -5451,6 +5451,7 @@ describe("queue processors", () => {
         get: async () => { calls.push("get"); return null; },
         set: async () => { calls.push("set"); },
         claim: async () => { calls.push("claim"); return true; },
+        releaseIfValue: async () => true,
       },
     });
     expect((await claimAiReviewLock(env, "owner/agent-repo", 7, "sha1", "block")).acquired).toBe(true);
@@ -5548,6 +5549,7 @@ describe("queue processors", () => {
         get: async () => { calls.push("get"); return null; },
         set: async () => { calls.push("set"); },
         claim: async () => { calls.push("claim"); return true; },
+        releaseIfValue: async () => true,
       },
     });
     expect((await claimPrActuationLock(env, "owner/act-repo", 7)).acquired).toBe(true);
@@ -5596,26 +5598,38 @@ describe("queue processors", () => {
     expect(await env.SELFHOST_TRANSIENT_CACHE!.get!("pr-actuation-lock:owner/act-repo#7")).toBeNull();
   });
 
-  it("does not blind-del when the cache lacks releaseIfValue (TTL backstop)", async () => {
-    let deleted = false;
+  it("REGRESSION: stale AI-review-lock holder releaseIfValue does not delete a successor's live lock", async () => {
+    const env = createTestEnv({});
+    const staleHolder = await claimAiReviewLock(env, "owner/agent-repo", 7, "sha1", "block");
+    expect(staleHolder.acquired).toBe(true);
+    expect(staleHolder.ownerToken).toBeTruthy();
+    await env.SELFHOST_TRANSIENT_CACHE!.set!("ai-review-lock:owner/agent-repo#7@sha1:block", "successor-token", 1800);
+    await releaseAiReviewLock(env, "owner/agent-repo", 7, "sha1", "block", staleHolder.ownerToken);
+    expect(await env.SELFHOST_TRANSIENT_CACHE!.get!("ai-review-lock:owner/agent-repo#7@sha1:block")).toBe("successor-token");
+    await releaseAiReviewLock(env, "owner/agent-repo", 7, "sha1", "block", "successor-token");
+    expect(await env.SELFHOST_TRANSIENT_CACHE!.get!("ai-review-lock:owner/agent-repo#7@sha1:block")).toBeNull();
+  });
+
+  it("claimPrActuationLock fails open without exclusivity when claim() is present but releaseIfValue is absent (#3153)", async () => {
+    let claimed = false;
     const store = new Map<string, string>();
     const env = createTestEnv({
       SELFHOST_TRANSIENT_CACHE: {
         get: async (key: string) => store.get(key) ?? null,
         set: async (key: string, value: string) => { store.set(key, value); },
         claim: async (key: string, value: string) => {
+          claimed = true;
           if (store.has(key)) return false;
           store.set(key, value);
           return true;
         },
-        del: async () => { deleted = true; },
       },
     });
     const lock = await claimPrActuationLock(env, "owner/act-repo", 7);
     expect(lock.acquired).toBe(true);
-    await releasePrActuationLock(env, "owner/act-repo", 7, lock.ownerToken);
-    expect(deleted).toBe(false);
-    expect(store.get("pr-actuation-lock:owner/act-repo#7")).toBe(lock.ownerToken);
+    expect(lock.ownerToken).toBeNull();
+    expect(claimed).toBe(false);
+    expect(store.size).toBe(0);
   });
 
   it("releaseIfValue errors are best-effort (TTL backstop)", async () => {

@@ -3474,10 +3474,15 @@ async function claimTransientLock(
   key: string,
   ttlSeconds: number,
 ): Promise<TransientLockClaim> {
-  if (!env.SELFHOST_TRANSIENT_CACHE?.claim) return { acquired: true, ownerToken: null };
+  const cache = env.SELFHOST_TRANSIENT_CACHE;
+  if (!cache?.claim) return { acquired: true, ownerToken: null };
+  // A claim()-only adapter without releaseIfValue would pin locks until TTL after normal work — reject that
+  // shape at self-host boot (assertSelfhostTransientCacheOwnershipRelease). At runtime, fail open without
+  // calling claim() so misconfigured test/custom adapters never acquire an unreleasable lock (#2129/#3153).
+  if (!cache.releaseIfValue) return { acquired: true, ownerToken: null };
   const ownerToken = randomUUID();
   try {
-    const acquired = await env.SELFHOST_TRANSIENT_CACHE.claim(key, ownerToken, ttlSeconds);
+    const acquired = await cache.claim(key, ownerToken, ttlSeconds);
     return { acquired, ownerToken: acquired ? ownerToken : null };
   } catch {
     return { acquired: true, ownerToken: null };
@@ -3492,11 +3497,8 @@ async function releaseTransientLockIfOwner(
   if (!ownerToken) return;
   try {
     const cache = env.SELFHOST_TRANSIENT_CACHE;
-    if (cache?.releaseIfValue) {
-      await cache.releaseIfValue(key, ownerToken);
-      return;
-    }
-    // Without compare-and-delete, skip release and let TTL expire — blind del() would reopen #2129/#2135.
+    if (!cache?.releaseIfValue) return;
+    await cache.releaseIfValue(key, ownerToken);
   } catch {
     // best-effort; TTL is the backstop if release fails
   }

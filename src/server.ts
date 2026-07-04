@@ -478,9 +478,10 @@ async function main(): Promise<void> {
   const { Redis } = await import("ioredis");
   const redisClient = new Redis(redisUrl);
   const { createRedisRateLimiter } = await import("./selfhost/redis-ratelimit");
-  const { createRedisCache } = await import("./selfhost/redis-cache");
+  const { createRedisCache, assertSelfhostTransientCacheOwnershipRelease } = await import("./selfhost/redis-cache");
   const rateLimiter = createRedisRateLimiter(redisClient);
   const webhookCache = createRedisCache(redisClient);
+  assertSelfhostTransientCacheOwnershipRelease(webhookCache);
   // Persist the installation-token cache in Redis so warm GitHub App tokens survive restarts/deploys and are
   // shared across replicas (the in-isolate Map otherwise re-mints — an Orb round-trip — per replica/cold start).
   const { createRedisTokenCache } = await import("./selfhost/redis-token-cache");

@@ -1,6 +1,6 @@
 import type { Redis } from "ioredis";
 import { describe, expect, it } from "vitest";
-import { createRedisCache } from "../../src/selfhost/redis-cache";
+import { assertSelfhostTransientCacheOwnershipRelease, createRedisCache } from "../../src/selfhost/redis-cache";
 
 /** Minimal in-memory stand-in for the ioredis methods the cache uses. Emulates real Redis SET NX
  *  semantics (refuse + return null when NX is requested and the key already exists) so a test
@@ -79,5 +79,14 @@ describe("createRedisCache (#1216 webhook dedup cache)", () => {
     expect(await cache.get("lock")).toBe("holder-a");
     expect(await cache.releaseIfValue("lock", "holder-a")).toBe(true);
     expect(await cache.get("lock")).toBeNull();
+  });
+
+  it("assertSelfhostTransientCacheOwnershipRelease rejects claim() without releaseIfValue at boot (#3153)", () => {
+    expect(() =>
+      assertSelfhostTransientCacheOwnershipRelease({
+        claim: async () => true,
+      }),
+    ).toThrow(/releaseIfValue/);
+    expect(() => assertSelfhostTransientCacheOwnershipRelease(createRedisCache(fakeRedis()))).not.toThrow();
   });
 });
