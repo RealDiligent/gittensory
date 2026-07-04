@@ -154,6 +154,7 @@ describe("gittensory-miner portfolio/queue store (#2292)", () => {
     expect(() => store.enqueue({ repoFullName: "o/a", identifier: "1", priority: Number.NaN })).toThrow(
       "invalid_priority",
     );
+    expect(() => store.enqueue({ repoFullName: "o/a", identifier: "1", priority: -1 })).toThrow("invalid_priority");
     // listQueue and markDone enforce the same repo/identifier validation as enqueue.
     expect(() => store.listQueue("no-slash")).toThrow("invalid_repo_full_name");
     expect(() => store.markDone("no-slash", "1")).toThrow("invalid_repo_full_name");

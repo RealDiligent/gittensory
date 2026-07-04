@@ -52,10 +52,12 @@ function normalizeIdentifier(identifier) {
   return trimmed;
 }
 
-/** Priority is a placeholder numeric input; an omitted priority defaults to 0, a non-finite one is rejected. */
+/** Priority is a placeholder numeric input; an omitted priority defaults to 0, a non-finite or negative one is rejected. */
 function normalizePriority(priority) {
   if (priority === undefined) return 0;
-  if (typeof priority !== "number" || !Number.isFinite(priority)) throw new Error("invalid_priority");
+  if (typeof priority !== "number" || !Number.isFinite(priority) || priority < 0) {
+    throw new Error("invalid_priority");
+  }
   return priority;
 }
 
