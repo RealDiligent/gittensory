@@ -465,6 +465,7 @@ import type {
 import { retryFailedRelays } from "../orb/relay";
 import { sha256Hex } from "../utils/crypto";
 import { errorMessage, nowIso } from "../utils/json";
+import { maybeSuggestMilestoneMatchForPr } from "../integrations/project-tracker-adapter";
 
 const OFFICIAL_MINER_DETECTION_TTL_MS = 5 * 60 * 1000;
 const OFFICIAL_MINER_DETECTION_UNAVAILABLE_TTL_MS = 60 * 1000;
@@ -5301,6 +5302,21 @@ async function processGitHubWebhook(
         linkedIssueAuthorLogins,
       });
       await persistAdvisory(env, advisory);
+      // Auto-project/milestone matching (#3183): independent of the gate/disposition entirely -- a missed or
+      // wrong match must never affect CI/merge, so this is a best-effort side comment, never a blocker. All the
+      // "should this run at all" gating + error logging lives in maybeSuggestMilestoneMatchForPr itself, so
+      // this call site stays a single unconditional call with no logic of its own.
+      await maybeSuggestMilestoneMatchForPr({
+        env,
+        installationId,
+        repoFullName,
+        pullNumber: pr.number,
+        prState: pr.state,
+        prTitle: pr.title,
+        prBody: pr.body,
+        mode: settings.autoProjectMilestoneMatch,
+        deliveryId,
+      });
       // Draft-dodge guard (#converted-to-draft): a contributor converting an OPEN PR to draft cannot use
       // draft state to keep a gate-rejected PR alive. When a prior gate failure exists for the PR's current
       // headSha (and the block has not been maintainer-overridden), close the PR immediately — the gate
