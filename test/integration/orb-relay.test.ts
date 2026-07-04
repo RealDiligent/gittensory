@@ -774,7 +774,6 @@ describe("pullRelayPending", () => {
     expect(stale ?? null).toBeNull();
     // Pull-mode loss is now traced for the operator at error level (parity with the push-path drop).
     expect(errLog.mock.calls.some(([line]) => String(line).includes("orb_relay_pending_dropped") && String(line).includes('"level":"error"'))).toBe(true);
-    errLog.mockRestore();
   });
 });
 
