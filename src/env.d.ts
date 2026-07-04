@@ -31,13 +31,13 @@ declare global {
       /** Atomic "set only if absent": returns true when this call newly claimed the key, false when it was
        *  already held by someone else. Unlike a get-then-set pair, there is no window where two concurrent
        *  callers can both observe an absent key and both claim it — the store (e.g. Redis SET NX) performs the
-       *  check-and-set as one operation. Optional so a cache adapter that hasn't implemented it yet still
-       *  type-checks; callers fall back to the non-atomic get/set pair when absent (#2129). */
+       *  check-and-set as one operation. Must be paired with `releaseIfValue` — self-host boot rejects
+       *  `claim()` without it; runtime callers fail open without exclusivity rather than pin locks (#2129). */
       claim?(key: string, value: string, ttlSeconds: number): Promise<boolean>;
       /** Atomic compare-and-delete: deletes `key` only when its current value equals `value`, returning whether
        *  it was removed. Lets a lock holder release its OWN claim without risking a stale post-TTL release
-       *  deleting a different holder's live claim on the same key. Optional; a cache without it skips release
-       *  entirely and relies on the TTL to reclaim the key (#2129). */
+       *  deleting a different holder's live claim on the same key. Required on any adapter that implements
+       *  `claim()` (validated at self-host boot). */
       releaseIfValue?(key: string, value: string): Promise<boolean>;
     };
     /** TODO (convergence follow-up): a per-PR LOCK Durable Object (`SubmissionLock` mutex) is a separate,

@@ -38,4 +38,15 @@ export function createRedisCache(redis: Redis) {
   };
 }
 
+/** Self-host boot guard: `claim()` without ownership-aware release pins actuation locks for minutes. */
+export function assertSelfhostTransientCacheOwnershipRelease(
+  cache: { claim?(key: string, value: string, ttlSeconds: number): Promise<boolean>; releaseIfValue?(key: string, value: string): Promise<boolean> },
+): void {
+  if (cache.claim && !cache.releaseIfValue) {
+    throw new Error(
+      "SELFHOST_TRANSIENT_CACHE.claim requires releaseIfValue for ownership-aware transient locks (#2129)",
+    );
+  }
+}
+
 export type RedisCache = ReturnType<typeof createRedisCache>;

@@ -3482,10 +3482,15 @@ async function claimTransientLock(
   key: string,
   ttlSeconds: number,
 ): Promise<TransientLockClaim> {
-  if (!env.SELFHOST_TRANSIENT_CACHE?.claim) return { acquired: true, ownerToken: null }; // no atomic primitive — nothing to serialize against.
+  const cache = env.SELFHOST_TRANSIENT_CACHE;
+  if (!cache?.claim) return { acquired: true, ownerToken: null }; // no atomic primitive — nothing to serialize against.
+  // A claim()-only adapter without releaseIfValue would pin locks until TTL after normal work — reject that
+  // shape at self-host boot (assertSelfhostTransientCacheOwnershipRelease). At runtime, fail open without
+  // calling claim() so misconfigured test/custom adapters never acquire an unreleasable lock (#2129/#3153).
+  if (!cache.releaseIfValue) return { acquired: true, ownerToken: null };
   const ownerToken = randomUUID();
   try {
-    const acquired = await env.SELFHOST_TRANSIENT_CACHE.claim(key, ownerToken, ttlSeconds);
+    const acquired = await cache.claim(key, ownerToken, ttlSeconds);
     return { acquired, ownerToken: acquired ? ownerToken : null };
   } catch {
     return { acquired: true, ownerToken: null }; // fail open — see the doc comment above.
@@ -3494,9 +3499,7 @@ async function claimTransientLock(
 
 /** Releases a transient lock ONLY when `ownerToken` still matches the stored value (atomic compare-and-delete),
  *  so a stale holder can never delete a different, live holder's claim on the same key. `ownerToken` is null
- *  on every fail-open claim path (nothing was actually claimed, so nothing to release). A cache with no
- *  releaseIfValue() skips release entirely and relies on the TTL to reclaim the key, rather than falling back
- *  to a blind del() that would reopen the exact race the token scheme exists to close. */
+ *  on every fail-open claim path (nothing was actually claimed, so nothing to release). */
 async function releaseTransientLockIfOwner(env: Env, key: string, ownerToken: string | null): Promise<void> {
   if (!ownerToken) return;
   const cache = env.SELFHOST_TRANSIENT_CACHE;
