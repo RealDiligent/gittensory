@@ -1201,6 +1201,36 @@ describe("maybeAddSecretLeakFinding patch-less fallback wiring", () => {
     expect(adv.findings).toHaveLength(0);
   });
 
+  it("skips makeGithubFileFetcher when headSha is whitespace-only", async () => {
+    const env = createTestEnv();
+    const adv = advisory();
+    const files = [
+      {
+        repoFullName: "acme/widgets",
+        pullNumber: 7,
+        path: "secrets.env",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        changes: 1,
+        payload: {},
+      },
+    ];
+    const groundingWire = await import("../../src/review/grounding-wire");
+    const spy = vi.spyOn(groundingWire, "makeGithubFileFetcher");
+    await maybeAddSecretLeakFinding(env, {
+      advisory: adv,
+      repoFullName: "acme/widgets",
+      pullNumber: 7,
+      files,
+      installationId: 1,
+      headSha: "   ",
+    });
+    spy.mockRestore();
+    expect(spy).not.toHaveBeenCalled();
+    expect(adv.findings).toHaveLength(0);
+  });
+
   it("skips makeGithubFileFetcher when every file already has an inline patch", async () => {
     const env = createTestEnv();
     const adv = advisory();

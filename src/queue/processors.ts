@@ -6760,12 +6760,13 @@ export async function maybeAddSecretLeakFinding(
     const files =
       args.files ??
       (await listPullRequestFiles(env, args.repoFullName, args.pullNumber));
+    const headSha = args.headSha?.trim() ?? "";
     let scanFiles = files;
-    if (args.headSha && hasPatchLessSecretScanCandidates(files, args.baseSha)) {
+    if (headSha && hasPatchLessSecretScanCandidates(files, args.baseSha)) {
       try {
         const fetcher = await makeGithubFileFetcher(env, args.repoFullName, args.installationId);
         scanFiles = await enrichSecretScanFilesWithPatchFallback(files, {
-          headSha: args.headSha,
+          headSha,
           baseSha: args.baseSha,
           fetcher,
         });
