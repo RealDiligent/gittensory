@@ -334,6 +334,28 @@ export type FocusManifestReviewConfig = {
    *  advisory finding; a check with `enforce: true` becomes a hard gate blocker. Empty (default) ⇒ no finding
    *  (byte-identical). No AI judgment is involved. (#review-pre-merge-checks) */
   preMergeChecks: PreMergeCheck[];
+  /** `review.auto_review`: deterministic eligibility filters that skip the AI review (never a gate failure).
+   *  Empty/default ⇒ every PR is reviewed (byte-identical). (#1954 / #2038–#2041) */
+  autoReview: AutoReviewConfig;
+};
+
+/** Per-repo AI review eligibility knobs under `review.auto_review`. Unset fields are byte-identical defaults. */
+export type AutoReviewConfig = {
+  /** `review.auto_review.skip_drafts`: when true, draft PRs skip AI review. null (default) ⇒ drafts reviewed as today. (#2038) */
+  skipDrafts: boolean | null;
+  /** `review.auto_review.ignore_authors`: author-login globs whose PRs skip AI review. Empty ⇒ every author. (#2039) */
+  ignoreAuthors: string[];
+  /** `review.auto_review.ignore_title_keywords`: case-insensitive title substrings that skip AI review. Empty ⇒ no skip. (#2040) */
+  ignoreTitleKeywords: string[];
+  /** `review.auto_review.base_branches`: base-ref globs whose PRs ARE reviewed; empty/unset ⇒ every base. (#2041) */
+  baseBranches: string[];
+};
+
+export const EMPTY_AUTO_REVIEW_CONFIG: AutoReviewConfig = {
+  skipDrafts: null,
+  ignoreAuthors: [],
+  ignoreTitleKeywords: [],
+  baseBranches: [],
 };
 
 /** One `review.path_instructions[]` entry: a manifest path glob + the public-safe instructions to apply when a
@@ -495,7 +517,7 @@ const EMPTY_MANIFEST: FocusManifest = {
   publicNotes: [],
   gate: { ...EMPTY_GATE_CONFIG },
   settings: {},
-  review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
+  review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [], autoReview: { ...EMPTY_AUTO_REVIEW_CONFIG } },
   features: { ...EMPTY_FEATURES_CONFIG },
   contentLane: { ...EMPTY_CONTENT_LANE_CONFIG },
   repoDocGeneration: { ...EMPTY_REPO_DOC_GENERATION_CONFIG },
@@ -525,7 +547,7 @@ function emptyManifest(source: FocusManifestSource, warnings: string[] = []): Fo
     warnings,
     gate: { ...EMPTY_GATE_CONFIG },
     settings: {},
-    review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
+    review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [], autoReview: { ...EMPTY_AUTO_REVIEW_CONFIG } },
     features: { ...EMPTY_FEATURES_CONFIG },
     contentLane: { ...EMPTY_CONTENT_LANE_CONFIG },
     repoDocGeneration: { ...EMPTY_REPO_DOC_GENERATION_CONFIG },
@@ -1431,7 +1453,7 @@ function parsePublicSafeText(value: JsonValue | undefined, field: string, warnin
  * throws; invalid/unsafe values are dropped with warnings.
  */
 function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): FocusManifestReviewConfig {
-  const empty: FocusManifestReviewConfig = { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] };
+  const empty: FocusManifestReviewConfig = { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [], autoReview: { ...EMPTY_AUTO_REVIEW_CONFIG } };
   if (value === undefined || value === null) return empty;
   if (typeof value !== "object" || Array.isArray(value)) {
     warnings.push(`Manifest field "review" must be a mapping; ignoring it.`);
@@ -1472,6 +1494,7 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
   const excludePaths = parseReviewExcludePaths(r.exclude_paths, warnings);
   const pathFilters = parseReviewPathFilters(r.path_filters, warnings);
   const preMergeChecks = parseReviewPreMergeChecks(r.pre_merge_checks, warnings);
+  const autoReview = parseAutoReviewConfig(r.auto_review, warnings);
   return {
     present:
       footerText !== null ||
@@ -1484,6 +1507,7 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
       excludePaths.length > 0 ||
       pathFilters.length > 0 ||
       preMergeChecks.length > 0 ||
+      autoReviewPresent(autoReview) ||
       Object.keys(fields).length > 0 ||
       Object.keys(enrichmentAnalyzers).length > 0,
     footerText,
@@ -1498,7 +1522,51 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
     excludePaths,
     pathFilters,
     preMergeChecks,
+    autoReview,
   };
+}
+
+function autoReviewPresent(config: AutoReviewConfig): boolean {
+  return config.skipDrafts !== null || config.ignoreAuthors.length > 0 || config.ignoreTitleKeywords.length > 0 || config.baseBranches.length > 0;
+}
+
+/** Parse `review.auto_review` — deterministic AI review eligibility filters. (#1954 / #2038–#2041) */
+function parseAutoReviewConfig(value: JsonValue | undefined, warnings: string[]): AutoReviewConfig {
+  if (value === undefined || value === null) return { ...EMPTY_AUTO_REVIEW_CONFIG };
+  if (typeof value !== "object" || Array.isArray(value)) {
+    warnings.push(`Manifest field "review.auto_review" must be a mapping; ignoring it.`);
+    return { ...EMPTY_AUTO_REVIEW_CONFIG };
+  }
+  const record = value as Record<string, JsonValue>;
+  return {
+    skipDrafts: normalizeOptionalBoolean(record.skip_drafts, "review.auto_review.skip_drafts", warnings),
+    ignoreAuthors: parseManifestGlobList(record.ignore_authors, "review.auto_review.ignore_authors", warnings),
+    ignoreTitleKeywords: parseAutoReviewTitleKeywords(record.ignore_title_keywords, warnings),
+    baseBranches: parseManifestGlobList(record.base_branches, "review.auto_review.base_branches", warnings),
+  };
+}
+
+function parseAutoReviewTitleKeywords(value: JsonValue | undefined, warnings: string[]): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    warnings.push(`Manifest "review.auto_review.ignore_title_keywords" must be a list of strings; ignoring it.`);
+    return [];
+  }
+  const out: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (out.length >= MAX_PATH_INSTRUCTIONS) {
+      warnings.push(`Manifest "review.auto_review.ignore_title_keywords" is capped at ${MAX_PATH_INSTRUCTIONS} entries; dropping the rest.`);
+      break;
+    }
+    const raw = typeof entry === "string" ? entry.trim() : "";
+    if (!raw) {
+      warnings.push(`Manifest "review.auto_review.ignore_title_keywords[${index}]" must be a non-empty string; ignoring it.`);
+      continue;
+    }
+    const safe = parsePublicSafeText(raw, `review.auto_review.ignore_title_keywords[${index}]`, warnings);
+    if (safe !== null) out.push(safe);
+  }
+  return out;
 }
 
 /** Parse `review.pre_merge_checks` — an array of DETERMINISTIC pre-merge assertions. Each entry needs a non-empty
@@ -1678,6 +1746,14 @@ export function reviewConfigToJson(review: FocusManifestReviewConfig): JsonValue
   if (review.pathInstructions.length > 0) out.path_instructions = review.pathInstructions.map((entry) => ({ path: entry.path, instructions: entry.instructions }));
   if (review.excludePaths.length > 0) out.exclude_paths = [...review.excludePaths];
   if (review.pathFilters.length > 0) out.path_filters = [...review.pathFilters];
+  if (autoReviewPresent(review.autoReview)) {
+    const autoReview: Record<string, JsonValue> = {};
+    if (review.autoReview.skipDrafts !== null) autoReview.skip_drafts = review.autoReview.skipDrafts;
+    if (review.autoReview.ignoreAuthors.length > 0) autoReview.ignore_authors = [...review.autoReview.ignoreAuthors];
+    if (review.autoReview.ignoreTitleKeywords.length > 0) autoReview.ignore_title_keywords = [...review.autoReview.ignoreTitleKeywords];
+    if (review.autoReview.baseBranches.length > 0) autoReview.base_branches = [...review.autoReview.baseBranches];
+    out.auto_review = autoReview;
+  }
   if (review.preMergeChecks.length > 0) {
     out.pre_merge_checks = review.preMergeChecks.map((check) => {
       const entry: Record<string, JsonValue> = { name: check.name };
@@ -1706,6 +1782,41 @@ export function resolveReviewPathInstructions(pathInstructions: ReviewPathInstru
   if (applicable.length === 0) return "";
   const lines = applicable.map((entry) => `- \`${entry.path}\`: ${entry.instructions}`);
   return `\n\nPath-specific review instructions from the maintainer — apply these to the changed files that match each glob:\n${lines.join("\n")}`;
+}
+
+export function resolveAutoReviewConfig(manifest: FocusManifest | null): AutoReviewConfig {
+  return manifest?.review.autoReview ?? { ...EMPTY_AUTO_REVIEW_CONFIG };
+}
+
+export type AutoReviewEligibilityInput = {
+  isDraft: boolean;
+  author: string | null;
+  title: string;
+  baseRef: string | null;
+};
+
+/** Evaluate `review.auto_review` eligibility. Returns a quiet skip reason string, or null when AI review should proceed. (#1954) */
+export function evaluateAutoReviewSkipReason(config: AutoReviewConfig, input: AutoReviewEligibilityInput): string | null {
+  if (config.skipDrafts === true && input.isDraft) return "review skipped (draft)";
+  if (input.author && config.ignoreAuthors.length > 0) {
+    const author = input.author.toLowerCase();
+    if (config.ignoreAuthors.some((glob) => matchesManifestPath(author, glob))) {
+      return "review skipped (ignored author)";
+    }
+  }
+  if (config.ignoreTitleKeywords.length > 0) {
+    const titleLower = input.title.toLowerCase();
+    if (config.ignoreTitleKeywords.some((keyword) => titleLower.includes(keyword.toLowerCase()))) {
+      return "review skipped (WIP title)";
+    }
+  }
+  if (config.baseBranches.length > 0) {
+    const baseRef = input.baseRef?.trim() ?? "";
+    if (!baseRef || !config.baseBranches.some((glob) => matchesManifestPath(baseRef, glob))) {
+      return "review skipped (base branch out of scope)";
+    }
+  }
+  return null;
 }
 
 /** Resolve the AI-reviewer overrides (`review.profile` + `review.security_focus` + `review.path_instructions` +

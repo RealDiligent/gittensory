@@ -576,6 +576,17 @@ settings:
 #   path_filters:
 #     - "src/**"
 #     - "!src/generated/**"
+#   # Deterministic AI review eligibility filters — skipped PRs never fail the gate. (#1954)
+#   auto_review:
+#     skip_drafts: true
+#     ignore_authors:
+#       - "*[bot]"
+#     ignore_title_keywords:
+#       - WIP
+#       - DRAFT
+#     base_branches:
+#       - main
+#       - release/**
 
 # Per-repo activation overrides for the converged review features that ship behind a deployment-wide
 # GITTENSORY_REVIEW_* env kill-switch (rag/reputation/unifiedComment/safety). Each key is `true` (force on

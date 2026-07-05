@@ -357,7 +357,9 @@ import { decidePublicSurface } from "../signals/settings-preview";
 import {
   buildFocusManifestGuidance,
   composeRepoReviewContext,
+  evaluateAutoReviewSkipReason,
   filterReviewFilesForAi,
+  resolveAutoReviewConfig,
   resolveRepoEnrichmentToggles,
   resolveReviewPathInstructions,
   resolveReviewPreMergeChecks,
@@ -7914,9 +7916,30 @@ async function maybePublishPrPublicSurface(
       !authorIsExemptFromFreeze &&
       manualReviewLabel !== null &&
       pr.labels.some((label) => label.toLowerCase() === manualReviewLabel.toLowerCase());
+    const reviewManifestForAutoReview = await loadRepoFocusManifest(env, repoFullName).catch(() => null);
+    const autoReviewSkipReason =
+      webhook.forceAiReview === true
+        ? null
+        : evaluateAutoReviewSkipReason(resolveAutoReviewConfig(reviewManifestForAutoReview), {
+            isDraft: pr.isDraft === true,
+            author,
+            title: pr.title,
+            baseRef: pr.baseRef ?? null,
+          });
+    if (autoReviewSkipReason) {
+      await recordAuditEvent(env, {
+        eventType: "github_app.ai_review_auto_review_skipped",
+        actor: author,
+        targetKey: `${repoFullName}#${pr.number}`,
+        outcome: "completed",
+        detail: autoReviewSkipReason,
+        metadata: { deliveryId: webhook.deliveryId, repoFullName, headSha: advisory.headSha ?? null },
+      }).catch(() => undefined);
+    }
     const aiReviewWillRun =
       !authorBlacklisted &&
       !isFrozenForManualReview &&
+      !autoReviewSkipReason &&
       (await shouldStartAiReviewForAdvisory(env, {
         settings,
         advisory,
@@ -8033,7 +8056,7 @@ async function maybePublishPrPublicSurface(
           agent: "dual-ai",
         },
         async () => {
-          const reviewManifest = await loadRepoFocusManifest(env, repoFullName).catch(() => null);
+          const reviewManifest = reviewManifestForAutoReview ?? (await loadRepoFocusManifest(env, repoFullName).catch(() => null));
           // `.gittensory.yml` review.profile + review.security_focus + review.path_instructions +
           // review.exclude_paths + review.path_filters (#review-profile / #review-security-focus /
           // #review-path-instructions / #review-exclude-paths / #2043): resolve from the manifest (cached from

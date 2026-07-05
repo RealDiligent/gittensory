@@ -18,7 +18,10 @@ import {
   resolveReviewPathInstructions,
   resolveReviewPreMergeChecks,
   composeRepoReviewContext,
+  evaluateAutoReviewSkipReason,
+  resolveAutoReviewConfig,
   resolveReviewPromptOverrides,
+  EMPTY_AUTO_REVIEW_CONFIG,
   repoDocGenerationConfigToJson,
   reviewConfigToJson,
   settingsOverrideToJson,
@@ -543,7 +546,7 @@ describe("compileFocusManifestPolicy", () => {
       publicNotes: ["Keep PRs focused.", "Maximize your reward payout"],
       gate: { present: false, enabled: null, checkMode: null, pack: null, linkedIssue: null, duplicates: null, readinessMode: null, readinessMinScore: null, slopMode: null, slopMinScore: null, slopAiAdvisory: null, sizeMode: null, lockfileIntegrityMode: null, aiReviewMode: null, aiReviewByok: null, aiReviewProvider: null, aiReviewModel: null, aiReviewAllAuthors: null, aiReviewCloseConfidence: null, aiReviewCombine: null, aiReviewOnMerge: null, aiReviewReviewers: null, mergeReadiness: null, selfAuthoredLinkedIssue: null, manifestPolicy: null, dryRun: null, firstTimeContributorGrace: null, premergeContentRecheck: null, requireFreshRebaseWindowMinutes: null, claMode: null, claConsentPhrase: null, claCheckRunName: null, claCheckRunAppSlug: null, expectedCiContexts: null },
       settings: {},
-      review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
+      review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [], autoReview: { ...EMPTY_AUTO_REVIEW_CONFIG } },
       features: { present: false, rag: null, reputation: null, unifiedComment: null, safety: null },
       contentLane: { present: false, entryFileGlob: null, providerFileGlob: null, artifactGlob: null, collectionField: null, maxAppendedEntries: null, duplicateKeyFields: [], validatorId: null },
       repoDocGeneration: { present: false, enabled: false, scope: ["agents"], allowOverwriteExisting: false, refreshIntervalDays: 7 },
@@ -2644,6 +2647,67 @@ describe("review.path_filters (#2043)", () => {
       { path: "src/a.ts" },
     ]);
     expect(filterReviewFilesForAi(files, [], [])).toBe(files);
+  });
+});
+
+describe("review.auto_review (#1954 / #2038–#2041)", () => {
+  it("parses auto_review knobs, marks present, and round-trips", () => {
+    const m = parseFocusManifest({
+      review: {
+        auto_review: {
+          skip_drafts: true,
+          ignore_authors: [" *[bot] ", "dependabot[bot]"],
+          ignore_title_keywords: [" WIP ", "draft"],
+          base_branches: ["main", "release/**"],
+        },
+      },
+    });
+    expect(m.review.autoReview).toEqual({
+      skipDrafts: true,
+      ignoreAuthors: ["*[bot]", "dependabot[bot]"],
+      ignoreTitleKeywords: ["WIP", "draft"],
+      baseBranches: ["main", "release/**"],
+    });
+    expect(m.review.present).toBe(true);
+    expect(parseFocusManifest({ review: reviewConfigToJson(m.review) }).review.autoReview).toEqual(m.review.autoReview);
+  });
+
+  it("ignores invalid auto_review entries with warnings", () => {
+    const bad = parseFocusManifest({ review: { auto_review: "nope" } });
+    expect(bad.review.autoReview).toEqual({ ...EMPTY_AUTO_REVIEW_CONFIG });
+    expect(bad.warnings.some((w) => /auto_review.*must be a mapping/.test(w))).toBe(true);
+    const skipDraftsBad = parseFocusManifest({ review: { auto_review: { skip_drafts: "yes" } } });
+    expect(skipDraftsBad.review.autoReview.skipDrafts).toBeNull();
+    expect(skipDraftsBad.warnings.some((w) => /skip_drafts.*boolean/.test(w))).toBe(true);
+    const keywordsBad = parseFocusManifest({ review: { auto_review: { ignore_title_keywords: ["", 42, "WIP"] } } });
+    expect(keywordsBad.review.autoReview.ignoreTitleKeywords).toEqual(["WIP"]);
+    expect(keywordsBad.warnings.some((w) => /ignore_title_keywords\[0\]/.test(w))).toBe(true);
+    expect(keywordsBad.warnings.some((w) => /ignore_title_keywords\[1\]/.test(w))).toBe(true);
+    const many = parseFocusManifest({
+      review: { auto_review: { ignore_authors: Array.from({ length: 60 }, (_, i) => `bot${i}`) } },
+    });
+    expect(many.review.autoReview.ignoreAuthors).toHaveLength(50);
+    expect(many.warnings.some((w) => /ignore_authors.*capped/.test(w))).toBe(true);
+  });
+
+  it("resolveAutoReviewConfig: null manifest yields empty defaults", () => {
+    expect(resolveAutoReviewConfig(null)).toEqual({ ...EMPTY_AUTO_REVIEW_CONFIG });
+  });
+
+  it("evaluateAutoReviewSkipReason: byte-identical when unset; skips with deterministic reasons when configured", () => {
+    const empty = { ...EMPTY_AUTO_REVIEW_CONFIG };
+    const input = { isDraft: true, author: "dependabot[bot]", title: "WIP: bump deps", baseRef: "develop" };
+    expect(evaluateAutoReviewSkipReason(empty, input)).toBeNull();
+    expect(evaluateAutoReviewSkipReason({ ...empty, skipDrafts: true }, { ...input, isDraft: true })).toBe("review skipped (draft)");
+    expect(evaluateAutoReviewSkipReason({ ...empty, skipDrafts: true }, { ...input, isDraft: false })).toBeNull();
+    expect(evaluateAutoReviewSkipReason({ ...empty, ignoreAuthors: ["*[bot]"] }, input)).toBe("review skipped (ignored author)");
+    expect(evaluateAutoReviewSkipReason({ ...empty, ignoreAuthors: ["human"] }, input)).toBeNull();
+    expect(evaluateAutoReviewSkipReason({ ...empty, ignoreTitleKeywords: ["wip"] }, { ...input, title: "Fix WIP regression" })).toBe("review skipped (WIP title)");
+    expect(evaluateAutoReviewSkipReason({ ...empty, ignoreTitleKeywords: ["wip"] }, { ...input, title: "Fix regression" })).toBeNull();
+    expect(evaluateAutoReviewSkipReason({ ...empty, baseBranches: ["main"] }, { ...input, baseRef: "develop" })).toBe(
+      "review skipped (base branch out of scope)",
+    );
+    expect(evaluateAutoReviewSkipReason({ ...empty, baseBranches: ["main", "release/**"] }, { ...input, baseRef: "release/1.2" })).toBeNull();
   });
 });
 
