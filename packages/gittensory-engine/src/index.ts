@@ -10,6 +10,7 @@ export {
   rankOpportunities,
   type OpportunityRankInput,
 } from "./opportunity-ranker.js";
+export { rankOpportunitiesAtOrAboveScore } from "./ranked-opportunity-min-score.js";
 export {
   extractObjectiveAnchorHistory,
   extractObjectiveAnchorFeatures,

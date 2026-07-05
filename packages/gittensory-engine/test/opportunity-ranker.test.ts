@@ -3,12 +3,13 @@
 // (dist/index.js) so the export contract itself is exercised. Pure module — no network, never flakes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rankOpportunityScore, rankOpportunities, pickTopRankedOpportunities } from "../dist/index.js";
+import { rankOpportunityScore, rankOpportunities, pickTopRankedOpportunities, rankOpportunitiesAtOrAboveScore } from "../dist/index.js";
 
 test("barrel: the public entrypoint re-exports the ranker API", () => {
   assert.equal(typeof rankOpportunityScore, "function");
   assert.equal(typeof rankOpportunities, "function");
   assert.equal(typeof pickTopRankedOpportunities, "function");
+  assert.equal(typeof rankOpportunitiesAtOrAboveScore, "function");
 });
 
 const full = { potential: 1, feasibility: 1, laneFit: 1, freshness: 1, dupRisk: 0 };
@@ -119,4 +120,19 @@ test("pickTopRankedOpportunities: rejects non-finite limits", () => {
   const candidates = [{ id: "only", ...full }];
   assert.deepEqual(pickTopRankedOpportunities(candidates, Number.NaN), []);
   assert.deepEqual(pickTopRankedOpportunities(candidates, Number.POSITIVE_INFINITY), []);
+});
+
+test("rankOpportunitiesAtOrAboveScore: keeps ranked candidates at or above the threshold", () => {
+  const candidates = [
+    { id: "low", potential: 0.2, feasibility: 1, laneFit: 1, freshness: 1, dupRisk: 0 },
+    { id: "high", potential: 0.9, feasibility: 1, laneFit: 1, freshness: 1, dupRisk: 0 },
+    { id: "mid", potential: 0.5, feasibility: 1, laneFit: 1, freshness: 1, dupRisk: 0 },
+  ];
+  const filtered = rankOpportunitiesAtOrAboveScore(candidates, 0.5);
+  assert.deepEqual(filtered.map((entry) => entry.id), ["high", "mid"]);
+});
+
+test("rankOpportunitiesAtOrAboveScore: rejects non-finite thresholds", () => {
+  const candidates = [{ id: "only", ...full }];
+  assert.deepEqual(rankOpportunitiesAtOrAboveScore(candidates, Number.NaN), []);
 });

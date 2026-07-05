@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pickTopRankedOpportunities, rankOpportunities, rankOpportunityScore, type OpportunityRankInput } from "../../packages/gittensory-engine/src/opportunity-ranker";
+import { rankOpportunitiesAtOrAboveScore } from "../../packages/gittensory-engine/src/ranked-opportunity-min-score";
 
 // A neutral, all-passing candidate (every factor 1, no contention → score 1); tests override one field at a time.
 function input(over: Partial<OpportunityRankInput> = {}): OpportunityRankInput {
@@ -184,5 +185,54 @@ describe("pickTopRankedOpportunities", () => {
     const barrel = await import("../../packages/gittensory-engine/src/index");
     expect(typeof barrel.pickTopRankedOpportunities).toBe("function");
     expect(barrel.pickTopRankedOpportunities(candidates, 1).map((entry) => entry.id)).toEqual(["top"]);
+  });
+});
+
+describe("rankOpportunitiesAtOrAboveScore", () => {
+  const candidates = [
+    { id: "mid", ...input({ potential: 0.5 }) },
+    { id: "top", ...input() },
+    { id: "low", ...input({ freshness: 0.25 }) },
+  ];
+
+  it("keeps only candidates at or above the score threshold in rank order", () => {
+    const filtered = rankOpportunitiesAtOrAboveScore(candidates, 0.5);
+    expect(filtered.map((entry) => entry.id)).toEqual(["top", "mid"]);
+    expect(filtered.every((entry) => entry.rankScore >= 0.5)).toBe(true);
+  });
+
+  it("returns every candidate when the threshold is zero", () => {
+    expect(rankOpportunitiesAtOrAboveScore(candidates, 0).map((entry) => entry.id)).toEqual([
+      "top",
+      "mid",
+      "low",
+    ]);
+  });
+
+  it("returns only perfect scores when the threshold is one", () => {
+    expect(rankOpportunitiesAtOrAboveScore(candidates, 1).map((entry) => entry.id)).toEqual(["top"]);
+  });
+
+  it("returns an empty array for a non-finite threshold or no candidates", () => {
+    expect(rankOpportunitiesAtOrAboveScore(candidates, Number.NaN)).toEqual([]);
+    expect(rankOpportunitiesAtOrAboveScore(candidates, Number.POSITIVE_INFINITY)).toEqual([]);
+    expect(rankOpportunitiesAtOrAboveScore([], 0.5)).toEqual([]);
+  });
+
+  it("clamps out-of-range thresholds before filtering", () => {
+    expect(rankOpportunitiesAtOrAboveScore(candidates, -0.5).map((entry) => entry.id)).toEqual([
+      "top",
+      "mid",
+      "low",
+    ]);
+    expect(rankOpportunitiesAtOrAboveScore(candidates, 1.5).map((entry) => entry.id)).toEqual(["top"]);
+  });
+
+  it("is exported from the package barrel", async () => {
+    const barrel = await import("../../packages/gittensory-engine/src/index");
+    expect(typeof barrel.rankOpportunitiesAtOrAboveScore).toBe("function");
+    expect(
+      barrel.rankOpportunitiesAtOrAboveScore(candidates, 0.5).map((entry: { id: string }) => entry.id),
+    ).toEqual(["top", "mid"]);
   });
 });
