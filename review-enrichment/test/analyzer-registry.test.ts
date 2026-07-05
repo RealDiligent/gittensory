@@ -49,6 +49,7 @@ const EXPECTED_ANALYZERS = [
   "conflictMarker",
   "debugLeftover",
   "sizeSmell",
+  "errorSwallow",
   "commitLint",
 ];
 
