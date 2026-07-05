@@ -980,6 +980,58 @@ describe("createSqliteQueue (durable #980)", () => {
     });
   });
 
+  it("REGRESSION (gate finding): a lost supersede race falls through to insert instead of overwriting a processing row", async () => {
+    const driver = makeDriver();
+    const q = createSqliteQueue(driver, async () => undefined);
+    await q.binding.send({
+      type: "rag-index-repo",
+      requestedBy: "webhook",
+      repoFullName: "JSONbored/gittensory",
+      paths: ["src/a.ts"],
+    }, { delaySeconds: 60 });
+    driver.query("UPDATE _selfhost_jobs SET status='processing' WHERE id=1", []);
+
+    await q.binding.send({
+      type: "rag-index-repo",
+      requestedBy: "schedule",
+      repoFullName: "JSONbored/gittensory",
+    }, { delaySeconds: 1 });
+
+    const rows = driver.query(
+      "SELECT id, status, payload, job_key FROM _selfhost_jobs ORDER BY id",
+      [],
+    ).rows as Array<{ id: number; status: string; payload: string; job_key: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ id: 1, status: "processing" });
+    expect(rows[1]).toMatchObject({
+      status: "pending",
+      job_key: "rag-index-repo:jsonbored/gittensory:full",
+    });
+    expect(JSON.parse(rows[1]!.payload)).toEqual({
+      type: "rag-index-repo",
+      requestedBy: "schedule",
+      repoFullName: "JSONbored/gittensory",
+    });
+  });
+
+  it("REGRESSION (gate finding): a lost simple-coalesce race falls through to insert instead of overwriting a processing row", async () => {
+    const driver = makeDriver();
+    const q = createSqliteQueue(driver, async () => undefined);
+    await q.binding.send(ciWebhook("ci-1", "check_suite"), { delaySeconds: 60 });
+    driver.query("UPDATE _selfhost_jobs SET status='processing' WHERE id=1", []);
+
+    await q.binding.send(ciWebhook("ci-2", "check_run"), { delaySeconds: 1 });
+
+    const rows = driver.query(
+      "SELECT id, status, payload FROM _selfhost_jobs ORDER BY id",
+      [],
+    ).rows as Array<{ id: number; status: string; payload: string }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ id: 1, status: "processing" });
+    expect(rows[1]).toMatchObject({ status: "pending" });
+    expect(JSON.parse(rows[1]!.payload).deliveryId).toBe("ci-2");
+  });
+
   it("does not merge a repo's incremental into an already-pending FULL job for that repo", async () => {
     const driver = makeDriver();
     const q = createSqliteQueue(driver, async () => undefined);

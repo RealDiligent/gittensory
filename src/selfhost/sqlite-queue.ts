@@ -523,17 +523,19 @@ export function createSqliteQueue(
         const mergedPayload = jobCoalesceMergedPayload(mergeCandidate.payload, payload);
         if (mergedPayload) {
           const mergedKey = jobCoalesceKey(mergedPayload);
-          driver.query(
+          const merged = driver.query(
             `UPDATE ${TABLE}
                SET payload=?, run_after=max(run_after, ?), created_at=?, priority=max(priority, ?), job_key=?,
                    claim_sort_key=CASE WHEN claim_sort_key>0 THEN min(claim_sort_key, ?) ELSE ? END,
                    last_error=NULL
-             WHERE id=?`,
+             WHERE id=? AND status='pending'`,
             [mergedPayload, runAfter, now, priority, mergedKey, claimSortKey, claimSortKey, mergeCandidate.id],
           );
-          recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
-          kickOne();
-          return;
+          if (merged.changes) {
+            recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
+            kickOne();
+            return;
+          }
         }
       }
     }
@@ -552,22 +554,24 @@ export function createSqliteQueue(
         // pending maintenance need must coalesce into the existing row without resetting how long that need has
         // genuinely been outstanding -- otherwise a re-enqueue cadence shorter than the trickle's maxDeferAgeMs
         // (4h default) can keep re-arming the clock forever, and sustained pressure defers the job indefinitely.
-        driver.query(
+        const superseded = driver.query(
           `UPDATE ${TABLE}
              SET payload=?, run_after=max(run_after, ?), priority=max(priority, ?), job_key=?, foreground_lane=?,
                  claim_sort_key=CASE WHEN claim_sort_key>0 THEN min(claim_sort_key, ?) ELSE ? END,
                  last_error=NULL
-           WHERE id=?`,
+           WHERE id=? AND status='pending'`,
           [payload, runAfter, priority, key, lane, claimSortKey, claimSortKey, existing.id],
         );
-        driver.query(
-          `DELETE FROM ${TABLE}
-           WHERE status='pending' AND id<>? AND job_key IS NOT NULL AND substr(job_key, 1, ?)=?`,
-          [existing.id, prefixLength, supersededKeyPrefix],
-        );
-        recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
-        kickOne();
-        return;
+        if (superseded.changes) {
+          driver.query(
+            `DELETE FROM ${TABLE}
+             WHERE status='pending' AND id<>? AND job_key IS NOT NULL AND substr(job_key, 1, ?)=?`,
+            [existing.id, prefixLength, supersededKeyPrefix],
+          );
+          recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
+          kickOne();
+          return;
+        }
       }
     }
     if (key) {
@@ -578,17 +582,19 @@ export function createSqliteQueue(
       if (existing) {
         // See the supersededKeyPrefix branch above: created_at is preserved across a coalesced re-enqueue so the
         // maintenance trickle clock reflects genuine wait time, not the most recent re-request.
-        driver.query(
+        const coalesced = driver.query(
           `UPDATE ${TABLE}
              SET payload=?, run_after=max(run_after, ?), priority=max(priority, ?), foreground_lane=?,
                  claim_sort_key=CASE WHEN claim_sort_key>0 THEN min(claim_sort_key, ?) ELSE ? END,
                  last_error=NULL
-           WHERE id=?`,
+           WHERE id=? AND status='pending'`,
           [payload, runAfter, priority, lane, claimSortKey, claimSortKey, existing.id],
         );
-        recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
-        kickOne();
-        return;
+        if (coalesced.changes) {
+          recordQueueMetric(driver, "gittensory_jobs_coalesced_total");
+          kickOne();
+          return;
+        }
       }
     }
     driver.query(
