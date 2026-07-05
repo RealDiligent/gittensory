@@ -1800,7 +1800,7 @@ export function evaluateAutoReviewSkipReason(config: AutoReviewConfig, input: Au
   if (config.skipDrafts === true && input.isDraft) return "review skipped (draft)";
   if (input.author && config.ignoreAuthors.length > 0) {
     const author = input.author.toLowerCase();
-    if (config.ignoreAuthors.some((glob) => matchesManifestPath(author, glob))) {
+    if (config.ignoreAuthors.some((glob) => matchesManifestPath(author, glob.toLowerCase()))) {
       return "review skipped (ignored author)";
     }
   }
@@ -1817,6 +1817,23 @@ export function evaluateAutoReviewSkipReason(config: AutoReviewConfig, input: Au
     }
   }
   return null;
+}
+
+export function resolvePullRequestAutoReviewSkipReason(args: {
+  forceAiReview?: boolean | undefined;
+  manifest: FocusManifest | null;
+  isDraft: boolean;
+  author: string | null;
+  title: string;
+  baseRef: string | null;
+}): string | null {
+  if (args.forceAiReview === true) return null;
+  return evaluateAutoReviewSkipReason(resolveAutoReviewConfig(args.manifest), {
+    isDraft: args.isDraft,
+    author: args.author,
+    title: args.title,
+    baseRef: args.baseRef,
+  });
 }
 
 /** Resolve the AI-reviewer overrides (`review.profile` + `review.security_focus` + `review.path_instructions` +

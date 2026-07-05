@@ -2701,6 +2701,9 @@ describe("review.auto_review (#1954 / #2038–#2041)", () => {
     expect(evaluateAutoReviewSkipReason({ ...empty, skipDrafts: true }, { ...input, isDraft: true })).toBe("review skipped (draft)");
     expect(evaluateAutoReviewSkipReason({ ...empty, skipDrafts: true }, { ...input, isDraft: false })).toBeNull();
     expect(evaluateAutoReviewSkipReason({ ...empty, ignoreAuthors: ["*[bot]"] }, input)).toBe("review skipped (ignored author)");
+    expect(evaluateAutoReviewSkipReason({ ...empty, ignoreAuthors: ["*[bot]"] }, { ...input, author: "Dependabot[bot]" })).toBe(
+      "review skipped (ignored author)",
+    );
     expect(evaluateAutoReviewSkipReason({ ...empty, ignoreAuthors: ["human"] }, input)).toBeNull();
     expect(evaluateAutoReviewSkipReason({ ...empty, ignoreTitleKeywords: ["wip"] }, { ...input, title: "Fix WIP regression" })).toBe("review skipped (WIP title)");
     expect(evaluateAutoReviewSkipReason({ ...empty, ignoreTitleKeywords: ["wip"] }, { ...input, title: "Fix regression" })).toBeNull();
@@ -2708,6 +2711,18 @@ describe("review.auto_review (#1954 / #2038–#2041)", () => {
       "review skipped (base branch out of scope)",
     );
     expect(evaluateAutoReviewSkipReason({ ...empty, baseBranches: ["main", "release/**"] }, { ...input, baseRef: "release/1.2" })).toBeNull();
+    expect(evaluateAutoReviewSkipReason({ ...empty, baseBranches: ["main"] }, { ...input, baseRef: null })).toBe(
+      "review skipped (base branch out of scope)",
+    );
+    expect(evaluateAutoReviewSkipReason({ ...empty, skipDrafts: false }, { ...input, isDraft: true })).toBeNull();
+  });
+
+  it("serializes explicit skip_drafts: false and drops unsafe title keywords", () => {
+    const m = parseFocusManifest({ review: { auto_review: { skip_drafts: false, ignore_title_keywords: ["WIP", "reward payout"] } } });
+    expect(m.review.autoReview.skipDrafts).toBe(false);
+    expect(m.review.autoReview.ignoreTitleKeywords).toEqual(["WIP"]);
+    expect(m.warnings.some((w) => /ignore_title_keywords\[1\]/.test(w))).toBe(true);
+    expect(parseFocusManifest({ review: reviewConfigToJson(m.review) }).review.autoReview.skipDrafts).toBe(false);
   });
 });
 

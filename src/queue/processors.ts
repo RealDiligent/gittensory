@@ -357,14 +357,14 @@ import { decidePublicSurface } from "../signals/settings-preview";
 import {
   buildFocusManifestGuidance,
   composeRepoReviewContext,
-  evaluateAutoReviewSkipReason,
   filterReviewFilesForAi,
-  resolveAutoReviewConfig,
+  resolvePullRequestAutoReviewSkipReason,
   resolveRepoEnrichmentToggles,
   resolveReviewPathInstructions,
   resolveReviewPreMergeChecks,
   resolveReviewPromptOverrides,
   type FocusManifestFinding,
+  type FocusManifest,
   type ReviewPathInstruction,
   type ReviewProfile,
 } from "../signals/focus-manifest";
@@ -6243,6 +6243,28 @@ export function shouldRequirePublicAiReviewForAdvisory(
   return true;
 }
 
+/** Record a quiet auto-review skip (never a gate failure). Exported for unit tests. (#1954) */
+export async function auditPullRequestAutoReviewSkip(
+  env: Env,
+  args: {
+    actor: string | null;
+    repoFullName: string;
+    pullNumber: number;
+    deliveryId: string;
+    headSha: string | null | undefined;
+    skipReason: string;
+  },
+): Promise<void> {
+  await recordAuditEvent(env, {
+    eventType: "github_app.ai_review_auto_review_skipped",
+    actor: args.actor,
+    targetKey: `${args.repoFullName}#${args.pullNumber}`,
+    outcome: "completed",
+    detail: args.skipReason,
+    metadata: { deliveryId: args.deliveryId, repoFullName: args.repoFullName, headSha: args.headSha ?? null },
+  }).catch(() => undefined);
+}
+
 async function resolveReviewEnrichmentGithubToken(
   env: Env,
   repoFullName: string,
@@ -7916,25 +7938,28 @@ async function maybePublishPrPublicSurface(
       !authorIsExemptFromFreeze &&
       manualReviewLabel !== null &&
       pr.labels.some((label) => label.toLowerCase() === manualReviewLabel.toLowerCase());
-    const reviewManifestForAutoReview = await loadRepoFocusManifest(env, repoFullName).catch(() => null);
-    const autoReviewSkipReason =
-      webhook.forceAiReview === true
-        ? null
-        : evaluateAutoReviewSkipReason(resolveAutoReviewConfig(reviewManifestForAutoReview), {
-            isDraft: pr.isDraft === true,
-            author,
-            title: pr.title,
-            baseRef: pr.baseRef ?? null,
-          });
-    if (autoReviewSkipReason) {
-      await recordAuditEvent(env, {
-        eventType: "github_app.ai_review_auto_review_skipped",
-        actor: author,
-        targetKey: `${repoFullName}#${pr.number}`,
-        outcome: "completed",
-        detail: autoReviewSkipReason,
-        metadata: { deliveryId: webhook.deliveryId, repoFullName, headSha: advisory.headSha ?? null },
-      }).catch(() => undefined);
+    let reviewManifestForAutoReview: FocusManifest | null = null;
+    let autoReviewSkipReason: string | null = null;
+    if (!authorBlacklisted && !isFrozenForManualReview) {
+      reviewManifestForAutoReview = await loadRepoFocusManifest(env, repoFullName).catch(() => null);
+      autoReviewSkipReason = resolvePullRequestAutoReviewSkipReason({
+        forceAiReview: webhook.forceAiReview,
+        manifest: reviewManifestForAutoReview,
+        isDraft: pr.isDraft === true,
+        author,
+        title: pr.title,
+        baseRef: pr.baseRef ?? null,
+      });
+      if (autoReviewSkipReason) {
+        await auditPullRequestAutoReviewSkip(env, {
+          actor: author,
+          repoFullName,
+          pullNumber: pr.number,
+          deliveryId: webhook.deliveryId,
+          headSha: advisory.headSha ?? null,
+          skipReason: autoReviewSkipReason,
+        });
+      }
     }
     const aiReviewWillRun =
       !authorBlacklisted &&
