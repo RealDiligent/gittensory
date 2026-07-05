@@ -78,6 +78,11 @@ import {
 } from "../db/repositories";
 import { pruneExpiredRecords } from "../db/retention";
 import {
+  effectiveIssueCapForAccountAge,
+  isBelowAccountAgeThreshold,
+  repoOwnerLoginFromFullName,
+} from "./account-age-throttle";
+import {
   backfillOpenPullRequestDetails,
   backfillRegisteredRepositories,
   backfillRepositorySegment,
@@ -4806,26 +4811,6 @@ async function verifiedGlobalOpenItemCount(
  * as NOT open (excluded from the count), never left as an unverified "counts toward the cap" default, because
  * this count gates an irreversible close (#2479 gate finding, second pass).
  */
-async function isBelowAccountAgeThreshold(
-  env: Env,
-  installationId: number,
-  authorLogin: string,
-  accountAgeThresholdDays: number | null | undefined,
-): Promise<boolean> {
-  if (typeof accountAgeThresholdDays !== "number") return false;
-  const createdAt = await getGithubUserCreatedAt(env, installationId, authorLogin);
-  if (!createdAt) return false;
-  const ageDays = (Date.now() - Date.parse(createdAt)) / (24 * 60 * 60 * 1000);
-  return ageDays < accountAgeThresholdDays;
-}
-
-function repoOwnerLoginFromFullName(fullName: string): string {
-  const slashIdx = fullName.indexOf("/");
-  /* v8 ignore next 2 -- defensive: GitHub always uses owner/repo form */
-  if (slashIdx === -1) return "";
-  return fullName.slice(0, slashIdx);
-}
-
 async function maybeCloseIssueOverContributorCap(
   env: Env,
   args: { installationId: number; repoFullName: string; issue: IssueRecord; settings: RepositorySettings },
@@ -4898,10 +4883,7 @@ async function maybeCloseIssueOverContributorCap(
   // cooldown already honor -- see the matching comment on the PR-side per-repo cap in the PR maintenance path.
   if (typeof cap !== "number" || isAutoCloseExempt(authorLogin, settings.autoCloseExemptLogins)) return;
 
-  let effectiveIssueCap = cap;
-  if (isNewAccount) {
-    effectiveIssueCap = Math.max(1, Math.ceil(cap / 2));
-  }
+  const effectiveIssueCap = effectiveIssueCapForAccountAge(cap, isNewAccount);
 
   const otherOpenIssues = await listOpenIssues(env, repoFullName);
   const authorLoginLower = authorLogin.toLowerCase();
