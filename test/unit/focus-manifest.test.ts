@@ -13,6 +13,8 @@ import {
   parseFocusManifestContent,
   resolveEffectiveSettings,
   excludeReviewPaths,
+  applyReviewPathFilters,
+  filterReviewFilesForAi,
   resolveReviewPathInstructions,
   resolveReviewPreMergeChecks,
   composeRepoReviewContext,
@@ -541,7 +543,7 @@ describe("compileFocusManifestPolicy", () => {
       publicNotes: ["Keep PRs focused.", "Maximize your reward payout"],
       gate: { present: false, enabled: null, checkMode: null, pack: null, linkedIssue: null, duplicates: null, readinessMode: null, readinessMinScore: null, slopMode: null, slopMinScore: null, slopAiAdvisory: null, sizeMode: null, lockfileIntegrityMode: null, aiReviewMode: null, aiReviewByok: null, aiReviewProvider: null, aiReviewModel: null, aiReviewAllAuthors: null, aiReviewCloseConfidence: null, aiReviewCombine: null, aiReviewOnMerge: null, aiReviewReviewers: null, mergeReadiness: null, selfAuthoredLinkedIssue: null, manifestPolicy: null, dryRun: null, firstTimeContributorGrace: null, premergeContentRecheck: null, requireFreshRebaseWindowMinutes: null, claMode: null, claConsentPhrase: null, claCheckRunName: null, claCheckRunAppSlug: null, expectedCiContexts: null },
       settings: {},
-      review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], preMergeChecks: [] },
+      review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
       features: { present: false, rag: null, reputation: null, unifiedComment: null, safety: null },
       contentLane: { present: false, entryFileGlob: null, providerFileGlob: null, artifactGlob: null, collectionField: null, maxAppendedEntries: null, duplicateKeyFields: [], validatorId: null },
       repoDocGeneration: { present: false, enabled: false, scope: ["agents"], allowOverwriteExisting: false, refreshIntervalDays: 7 },
@@ -2516,10 +2518,10 @@ describe("resolveReviewPathInstructions (#review-path-instructions)", () => {
   });
 
   it("resolveReviewPromptOverrides: non-null manifest passes the config through; null manifest → defaults", () => {
-    const manifest = parseFocusManifest({ review: { profile: "chill", security_focus: true, inline_comments: true, path_instructions: [{ path: "src/**", instructions: "be strict" }], instructions: "Follow our async-error conventions.", exclude_paths: ["**/*.lock"] } });
-    expect(resolveReviewPromptOverrides(manifest)).toEqual({ profile: "chill", securityFocus: true, inlineComments: true, pathInstructions: [{ path: "src/**", instructions: "be strict" }], instructions: "Follow our async-error conventions.", excludePaths: ["**/*.lock"] });
+    const manifest = parseFocusManifest({ review: { profile: "chill", security_focus: true, inline_comments: true, path_instructions: [{ path: "src/**", instructions: "be strict" }], instructions: "Follow our async-error conventions.", exclude_paths: ["**/*.lock"], path_filters: ["src/**", "!src/generated/**"] } });
+    expect(resolveReviewPromptOverrides(manifest)).toEqual({ profile: "chill", securityFocus: true, inlineComments: true, pathInstructions: [{ path: "src/**", instructions: "be strict" }], instructions: "Follow our async-error conventions.", excludePaths: ["**/*.lock"], pathFilters: ["src/**", "!src/generated/**"] });
     // A null manifest (load failure) yields the byte-identical defaults; inline comments + security focus default OFF.
-    expect(resolveReviewPromptOverrides(null)).toEqual({ profile: null, securityFocus: false, inlineComments: false, pathInstructions: [], instructions: null, excludePaths: [] });
+    expect(resolveReviewPromptOverrides(null)).toEqual({ profile: null, securityFocus: false, inlineComments: false, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [] });
     // An explicit false / absent toggle both resolve to the strict-boolean false.
     expect(resolveReviewPromptOverrides(parseFocusManifest({ review: { inline_comments: false } })).inlineComments).toBe(false);
     expect(resolveReviewPromptOverrides(parseFocusManifest({ review: { profile: "chill" } })).inlineComments).toBe(false);
@@ -2582,6 +2584,66 @@ describe("review.exclude_paths (#review-exclude-paths)", () => {
   it("does not exclude attacker-named suffix collisions for **/ basename globs (#review-audit)", () => {
     const files = [{ path: "unsafe.ts" }, { path: "dir/safe.ts" }, { path: "feature.ts" }];
     expect(excludeReviewPaths(files, ["**/safe.ts"])).toEqual([{ path: "unsafe.ts" }, { path: "feature.ts" }]);
+  });
+});
+
+describe("review.path_filters (#2043)", () => {
+  it("parses path_filters with include + negation, trims, marks present, and round-trips", () => {
+    const m = parseFocusManifest({ review: { path_filters: [" src/** ", "!src/generated/**", ""] } });
+    expect(m.review.pathFilters).toEqual(["src/**", "!src/generated/**"]);
+    expect(m.review.present).toBe(true);
+    expect(m.warnings.some((w) => /path_filters\[2\]/.test(w))).toBe(true);
+    expect(parseFocusManifest({ review: reviewConfigToJson(m.review) }).review.pathFilters).toEqual(m.review.pathFilters);
+  });
+
+  it("ignores invalid path_filters entries and caps the list", () => {
+    const bad = parseFocusManifest({ review: { path_filters: "src/**" } });
+    expect(bad.review.pathFilters).toEqual([]);
+    expect(bad.warnings.some((w) => /path_filters.*must be a list/.test(w))).toBe(true);
+    const bareNegation = parseFocusManifest({ review: { path_filters: ["!"] } });
+    expect(bareNegation.review.pathFilters).toEqual([]);
+    expect(bareNegation.warnings.some((w) => /path_filters\[0\].*after a leading '!'/i.test(w))).toBe(true);
+    const many = parseFocusManifest({ review: { path_filters: Array.from({ length: 60 }, (_, i) => `dir${i}/**`) } });
+    expect(many.review.pathFilters).toHaveLength(50);
+    expect(many.warnings.some((w) => /path_filters.*capped/.test(w))).toBe(true);
+  });
+
+  it("drops an over-long path_filters glob (defense-in-depth length cap)", () => {
+    const huge = `${"a".repeat(400)}/x.ts`;
+    const m = parseFocusManifest({ review: { path_filters: [huge, "src/**"] } });
+    expect(m.review.pathFilters).toEqual(["src/**"]);
+    expect(m.warnings.some((w) => /path_filters\[0\].*exceeds/.test(w))).toBe(true);
+  });
+
+  it("drops non-string path_filters entries with warnings", () => {
+    const m = parseFocusManifest({ review: { path_filters: [42, "src/**"] } });
+    expect(m.review.pathFilters).toEqual(["src/**"]);
+    expect(m.warnings.some((w) => /path_filters\[0\]/.test(w))).toBe(true);
+  });
+
+  it("applyReviewPathFilters: include-only restricts; negation subtracts; empty is byte-identical", () => {
+    const files = [
+      { path: "src/a.ts" },
+      { path: "src/generated/x.ts" },
+      { path: "docs/readme.md" },
+    ];
+    expect(applyReviewPathFilters(files, ["src/**"])).toEqual([{ path: "src/a.ts" }, { path: "src/generated/x.ts" }]);
+    expect(applyReviewPathFilters(files, ["src/**", "!src/generated/**"])).toEqual([{ path: "src/a.ts" }]);
+    expect(applyReviewPathFilters(files, ["!docs/**"])).toEqual([{ path: "src/a.ts" }, { path: "src/generated/x.ts" }]);
+    expect(applyReviewPathFilters(files, [])).toBe(files);
+  });
+
+  it("filterReviewFilesForAi applies exclude_paths before path_filters", () => {
+    const files = [
+      { path: "src/a.ts" },
+      { path: "src/generated/x.ts" },
+      { path: "pnpm-lock.yaml" },
+      { path: "docs/readme.md" },
+    ];
+    expect(filterReviewFilesForAi(files, ["**/*.lock", "pnpm-lock.yaml"], ["src/**", "!src/generated/**"])).toEqual([
+      { path: "src/a.ts" },
+    ]);
+    expect(filterReviewFilesForAi(files, [], [])).toBe(files);
   });
 });
 

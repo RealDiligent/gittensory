@@ -357,7 +357,7 @@ import { decidePublicSurface } from "../signals/settings-preview";
 import {
   buildFocusManifestGuidance,
   composeRepoReviewContext,
-  excludeReviewPaths,
+  filterReviewFilesForAi,
   resolveRepoEnrichmentToggles,
   resolveReviewPathInstructions,
   resolveReviewPreMergeChecks,
@@ -6294,6 +6294,9 @@ export async function runAiReviewForAdvisory(
     // manifest. Globs whose files are dropped from the AI review (diff + grounding + RAG) — generated/lockfiles
     // the maintainer doesn't want reviewed. Empty ⇒ every file is reviewed (byte-identical). The gate is unaffected.
     reviewExcludePaths?: string[] | undefined;
+    // `.gittensory.yml` review.path_filters (#2043): include + `!`-negation globs applied AFTER exclude_paths to
+    // positively scope the AI review. Empty ⇒ every non-excluded file is reviewed (byte-identical). Gate unaffected.
+    reviewPathFilters?: string[] | undefined;
     // `.gittensory.yml` review.inline_comments (#inline-comments), resolved by the caller from the cached manifest
     // (the per-repo toggle). ANDed here with the operator flag + cutover allowlist to decide whether to ASK the
     // model for line-anchored inline findings. Absent/false ⇒ the reviewer prompt is byte-identical (no findings).
@@ -6433,15 +6436,16 @@ export async function runAiReviewForAdvisory(
         : null;
     // FIX B: prefer the caller's pre-resolved files (real diff even on a pre-sync first review); fall back to
     // the stored read when the caller didn't pass them (e.g. unit tests calling this function directly).
-    // review.exclude_paths (#review-exclude-paths): advisory-mode prose can skip generated/lockfiles, but block
-    // mode is gate-relevant and must review the full diff so excluded paths cannot bypass AI consensus blockers.
+    // review.exclude_paths + review.path_filters (#review-exclude-paths / #2043): advisory-mode prose can skip
+    // generated/lockfiles and positively scope review targets, but block mode is gate-relevant and must review the
+    // full diff so filtered paths cannot bypass AI consensus blockers.
     const allFiles =
       args.files ??
       (await listPullRequestFiles(env, args.repoFullName, args.pr.number));
     const files =
       args.settings.aiReviewMode === "block"
         ? allFiles
-        : excludeReviewPaths(allFiles, args.reviewExcludePaths ?? []);
+        : filterReviewFilesForAi(allFiles, args.reviewExcludePaths ?? [], args.reviewPathFilters ?? []);
     // Grounding (convergence, flag-gated by GITTENSORY_REVIEW_GROUNDING). Build the FINISHED CI status + the full
     // content of the changed files so the reviewer verifies its claims against reality instead of guessing.
     // Flag-OFF (default) → we take no new branch at all: NO check/repo load, NO file fetch, and `grounding`
@@ -8031,12 +8035,13 @@ async function maybePublishPrPublicSurface(
         async () => {
           const reviewManifest = await loadRepoFocusManifest(env, repoFullName).catch(() => null);
           // `.gittensory.yml` review.profile + review.security_focus + review.path_instructions +
-          // review.exclude_paths (#review-profile / #review-security-focus / #review-path-instructions /
-          // #review-exclude-paths): resolve from the manifest (cached from settings resolution, so a cheap cache
-          // hit — no extra fetch) and thread them into the AI review. Profile shapes nitpickiness; security-focus
-          // adds elevated scrutiny for a security-defect category (orthogonal to profile); path-instructions add
-          // per-path guidance; exclude-paths drop files from review. Absent ⇒ byte-identical prompt. Fail-safe to
-          // defaults on any read error (resolveReviewPromptOverrides).
+          // review.exclude_paths + review.path_filters (#review-profile / #review-security-focus /
+          // #review-path-instructions / #review-exclude-paths / #2043): resolve from the manifest (cached from
+          // settings resolution, so a cheap cache hit — no extra fetch) and thread them into the AI review. Profile
+          // shapes nitpickiness; security-focus adds elevated scrutiny for a security-defect category (orthogonal
+          // to profile); path-instructions add per-path guidance; exclude-paths drop files from review; path-filters
+          // positively scope the review set after excludes. Absent ⇒ byte-identical prompt. Fail-safe to defaults on
+          // any read error (resolveReviewPromptOverrides).
           const {
             profile: reviewProfile,
             securityFocus: reviewSecurityFocus,
@@ -8044,6 +8049,7 @@ async function maybePublishPrPublicSurface(
             pathInstructions: reviewPathInstructions,
             instructions: manifestReviewInstructions,
             excludePaths: reviewExcludePaths,
+            pathFilters: reviewPathFilters,
           } = resolveReviewPromptOverrides(reviewManifest);
           inlineCommentsEnabledForReview = shouldRequestInlineFindings(
             env,
@@ -8132,6 +8138,7 @@ async function maybePublishPrPublicSurface(
             ),
             repoInstructions: reviewInstructions,
             excludePaths: reviewExcludePaths,
+            pathFilters: reviewPathFilters,
             changedPaths,
             reviewFiles: reviewFilesForAi.map((file) => ({
               path: file.path,
@@ -8236,6 +8243,7 @@ async function maybePublishPrPublicSurface(
               reviewPathInstructions,
               reviewInstructions,
               reviewExcludePaths,
+              reviewPathFilters,
               reviewInlineComments,
               deliveryId: webhook.deliveryId,
             });

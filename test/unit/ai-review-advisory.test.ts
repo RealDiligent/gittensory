@@ -491,6 +491,58 @@ describe("runAiReviewForAdvisory", () => {
     expect(prompt).not.toContain("const skipped = true");
   });
 
+  it("does not apply review.path_filters to block-mode gate-relevant AI consensus", async () => {
+    const prompts: string[] = [];
+    const env = aiEnv(async (...args: unknown[]) => {
+      const prompt = JSON.stringify(args);
+      prompts.push(prompt);
+      return { response: prompt.includes("PATH_FILTER_MARKER") ? defectJson() : notesOnlyJson() };
+    });
+
+    await runAiReviewForAdvisory(env, {
+      settings: { aiReviewMode: "block" } as RepositorySettings,
+      advisory: advisory(),
+      repoFullName: "acme/widgets",
+      pr,
+      author: "alice",
+      confirmedContributor: true,
+      files: [fileRecord({ path: "docs/out-of-scope.md", status: "modified", payload: { patch: "@@\n+const marker = 'PATH_FILTER_MARKER';" } })],
+      reviewPathFilters: ["src/**"],
+    });
+
+    expect(prompts.join("\n")).toContain("PATH_FILTER_MARKER");
+  });
+
+  it("still applies review.path_filters to advisory-mode prose after exclude_paths", async () => {
+    const prompts: string[] = [];
+    const env = aiEnv(async (...args: unknown[]) => {
+      prompts.push(JSON.stringify(args));
+      return { response: notesOnlyJson() };
+    });
+
+    await runAiReviewForAdvisory(env, {
+      settings: { aiReviewMode: "advisory" } as RepositorySettings,
+      advisory: advisory(),
+      repoFullName: "acme/widgets",
+      pr,
+      author: "alice",
+      confirmedContributor: true,
+      files: [
+        fileRecord({ path: "src/generated/skipped.ts", status: "modified", payload: { patch: "@@\n+const generated = true;" } }),
+        fileRecord({ path: "src/reviewed.ts", status: "modified", payload: { patch: "@@\n+const reviewed = true;" } }),
+        fileRecord({ path: "docs/readme.md", status: "modified", payload: { patch: "@@\n+const docs = true;" } }),
+      ],
+      reviewExcludePaths: ["src/generated/**"],
+      reviewPathFilters: ["src/**"],
+    });
+
+    const prompt = prompts.join("\n");
+    expect(prompt).toContain("src/reviewed.ts");
+    expect(prompt).toContain("const reviewed = true");
+    expect(prompt).not.toContain("src/generated/skipped.ts");
+    expect(prompt).not.toContain("docs/readme.md");
+  });
+
   it("returns advisory notes without a finding in advisory mode", async () => {
     const adv = advisory();
     const result = await runAiReviewForAdvisory(aiEnv(async () => ({ response: notesOnlyJson() })), {

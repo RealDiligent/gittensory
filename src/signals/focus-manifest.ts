@@ -324,6 +324,11 @@ export type FocusManifestReviewConfig = {
    *  reviewed (byte-identical). Gate/slop/secret-scan are UNAFFECTED — this only narrows the AI review.
    *  (#review-exclude-paths) */
   excludePaths: string[];
+  /** `review.path_filters`: include + `!`-negation globs that POSITIVELY scope the AI review AFTER
+   *  `exclude_paths`. Include entries restrict to matching paths; leading `!` entries subtract matches.
+   *  Both `*` and `**` cross slashes (see `compileManifestPathMatcher`). Empty (default) ⇒ every non-excluded
+   *  file is reviewed (byte-identical). Gate/slop/secret-scan are UNAFFECTED. (#2043) */
+  pathFilters: string[];
   /** `review.pre_merge_checks`: maintainer-declared DETERMINISTIC content assertions (title/description must
    *  contain a phrase, a label must be present), optionally gated to a path glob. Each FAILED check surfaces an
    *  advisory finding; a check with `enforce: true` becomes a hard gate blocker. Empty (default) ⇒ no finding
@@ -490,7 +495,7 @@ const EMPTY_MANIFEST: FocusManifest = {
   publicNotes: [],
   gate: { ...EMPTY_GATE_CONFIG },
   settings: {},
-  review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], preMergeChecks: [] },
+  review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
   features: { ...EMPTY_FEATURES_CONFIG },
   contentLane: { ...EMPTY_CONTENT_LANE_CONFIG },
   repoDocGeneration: { ...EMPTY_REPO_DOC_GENERATION_CONFIG },
@@ -520,7 +525,7 @@ function emptyManifest(source: FocusManifestSource, warnings: string[] = []): Fo
     warnings,
     gate: { ...EMPTY_GATE_CONFIG },
     settings: {},
-    review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], preMergeChecks: [] },
+    review: { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] },
     features: { ...EMPTY_FEATURES_CONFIG },
     contentLane: { ...EMPTY_CONTENT_LANE_CONFIG },
     repoDocGeneration: { ...EMPTY_REPO_DOC_GENERATION_CONFIG },
@@ -1426,7 +1431,7 @@ function parsePublicSafeText(value: JsonValue | undefined, field: string, warnin
  * throws; invalid/unsafe values are dropped with warnings.
  */
 function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): FocusManifestReviewConfig {
-  const empty: FocusManifestReviewConfig = { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], preMergeChecks: [] };
+  const empty: FocusManifestReviewConfig = { present: false, footerText: null, note: null, fields: {}, enrichmentAnalyzers: {}, profile: null, securityFocus: null, inlineComments: null, pathInstructions: [], instructions: null, excludePaths: [], pathFilters: [], preMergeChecks: [] };
   if (value === undefined || value === null) return empty;
   if (typeof value !== "object" || Array.isArray(value)) {
     warnings.push(`Manifest field "review" must be a mapping; ignoring it.`);
@@ -1465,6 +1470,7 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
   const pathInstructions = parseReviewPathInstructions(r.path_instructions, warnings);
   const instructions = parsePublicSafeText(r.instructions, "review.instructions", warnings);
   const excludePaths = parseReviewExcludePaths(r.exclude_paths, warnings);
+  const pathFilters = parseReviewPathFilters(r.path_filters, warnings);
   const preMergeChecks = parseReviewPreMergeChecks(r.pre_merge_checks, warnings);
   return {
     present:
@@ -1476,6 +1482,7 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
       pathInstructions.length > 0 ||
       instructions !== null ||
       excludePaths.length > 0 ||
+      pathFilters.length > 0 ||
       preMergeChecks.length > 0 ||
       Object.keys(fields).length > 0 ||
       Object.keys(enrichmentAnalyzers).length > 0,
@@ -1489,6 +1496,7 @@ function parseReviewConfig(value: JsonValue | undefined, warnings: string[]): Fo
     pathInstructions,
     instructions,
     excludePaths,
+    pathFilters,
     preMergeChecks,
   };
 }
@@ -1569,6 +1577,39 @@ function parseReviewExcludePaths(value: JsonValue | undefined, warnings: string[
   return parseManifestGlobList(value, "review.exclude_paths", warnings);
 }
 
+/** Parse `review.path_filters` — include globs plus optional leading-`!` negation entries. (#2043) */
+function parseReviewPathFilters(value: JsonValue | undefined, warnings: string[]): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    warnings.push(`Manifest "review.path_filters" must be a list of path globs; ignoring it.`);
+    return [];
+  }
+  const out: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    if (out.length >= MAX_PATH_INSTRUCTIONS) {
+      warnings.push(`Manifest "review.path_filters" is capped at ${MAX_PATH_INSTRUCTIONS} entries; dropping the rest.`);
+      break;
+    }
+    const raw = typeof entry === "string" ? entry.trim() : "";
+    if (!raw) {
+      warnings.push(`Manifest "review.path_filters[${index}]" must be a non-empty string; ignoring it.`);
+      continue;
+    }
+    const negated = raw.startsWith("!");
+    const glob = negated ? raw.slice(1).trim() : raw;
+    if (!glob) {
+      warnings.push(`Manifest "review.path_filters[${index}]" must include a glob after a leading '!'; ignoring it.`);
+      continue;
+    }
+    if (glob.length > MAX_ITEM_LENGTH) {
+      warnings.push(`Manifest "review.path_filters[${index}]" exceeds ${MAX_ITEM_LENGTH} chars; ignoring it.`);
+      continue;
+    }
+    out.push(negated ? `!${glob}` : glob);
+  }
+  return out;
+}
+
 /** Parse `review.path_instructions` — an array of `{ path, instructions }` entries. Each must have a non-empty
  *  string `path` (a manifest glob) and PUBLIC-SAFE string `instructions`; invalid/unsafe entries are dropped with
  *  a warning. Capped at MAX_PATH_INSTRUCTIONS so a huge manifest can't bloat the reviewer prompt. */
@@ -1636,6 +1677,7 @@ export function reviewConfigToJson(review: FocusManifestReviewConfig): JsonValue
   if (review.instructions !== null) out.instructions = review.instructions;
   if (review.pathInstructions.length > 0) out.path_instructions = review.pathInstructions.map((entry) => ({ path: entry.path, instructions: entry.instructions }));
   if (review.excludePaths.length > 0) out.exclude_paths = [...review.excludePaths];
+  if (review.pathFilters.length > 0) out.path_filters = [...review.pathFilters];
   if (review.preMergeChecks.length > 0) {
     out.pre_merge_checks = review.preMergeChecks.map((check) => {
       const entry: Record<string, JsonValue> = { name: check.name };
@@ -1667,15 +1709,15 @@ export function resolveReviewPathInstructions(pathInstructions: ReviewPathInstru
 }
 
 /** Resolve the AI-reviewer overrides (`review.profile` + `review.security_focus` + `review.path_instructions` +
- *  `review.exclude_paths`) from a possibly-null manifest (null = load failure). A null manifest yields the
- *  byte-identical defaults. Centralized so the AI-review caller threads them in one place with the null-manifest
- *  branch covered here (unit-tested) rather than inline in the processor.
- *  (#review-profile / #review-security-focus / #review-path-instructions / #review-exclude-paths) */
-export function resolveReviewPromptOverrides(manifest: FocusManifest | null): { profile: ReviewProfile | null; securityFocus: boolean; inlineComments: boolean; pathInstructions: ReviewPathInstruction[]; instructions: string | null; excludePaths: string[] } {
+ *  `review.exclude_paths` + `review.path_filters`) from a possibly-null manifest (null = load failure). A null
+ *  manifest yields the byte-identical defaults. Centralized so the AI-review caller threads them in one place
+ *  with the null-manifest branch covered here (unit-tested) rather than inline in the processor.
+ *  (#review-profile / #review-security-focus / #review-path-instructions / #review-exclude-paths / #2043) */
+export function resolveReviewPromptOverrides(manifest: FocusManifest | null): { profile: ReviewProfile | null; securityFocus: boolean; inlineComments: boolean; pathInstructions: ReviewPathInstruction[]; instructions: string | null; excludePaths: string[]; pathFilters: string[] } {
   // inlineComments resolves to a strict boolean — true ONLY when the manifest explicitly set review.inline_comments:
   // true; null/false/absent ⇒ false. The caller ANDs this per-repo toggle with the operator flag + cutover allowlist.
   // securityFocus resolves the same way — true ONLY when the manifest explicitly set review.security_focus: true.
-  return { profile: manifest?.review.profile ?? null, securityFocus: manifest?.review.securityFocus === true, inlineComments: manifest?.review.inlineComments === true, pathInstructions: manifest?.review.pathInstructions ?? [], instructions: manifest?.review.instructions ?? null, excludePaths: manifest?.review.excludePaths ?? [] };
+  return { profile: manifest?.review.profile ?? null, securityFocus: manifest?.review.securityFocus === true, inlineComments: manifest?.review.inlineComments === true, pathInstructions: manifest?.review.pathInstructions ?? [], instructions: manifest?.review.instructions ?? null, excludePaths: manifest?.review.excludePaths ?? [], pathFilters: manifest?.review.pathFilters ?? [] };
 }
 
 /** Resolve `review.pre_merge_checks` from a possibly-null manifest (null = load failure ⇒ no checks). Centralized
@@ -1755,6 +1797,35 @@ export function composeRepoReviewContext(
 export function excludeReviewPaths<T extends { path: string }>(files: T[], excludePaths: string[]): T[] {
   if (excludePaths.length === 0) return files;
   return files.filter((file) => !excludePaths.some((glob) => matchesManifestPath(file.path, glob)));
+}
+
+/** Apply `review.path_filters` after `exclude_paths`: include globs restrict the set; leading-`!` entries
+ *  subtract matches. Empty `pathFilters` ⇒ the same array (byte-identical). (#2043) */
+export function applyReviewPathFilters<T extends { path: string }>(files: T[], pathFilters: string[]): T[] {
+  if (pathFilters.length === 0) return files;
+  const includes: string[] = [];
+  const negations: string[] = [];
+  for (const entry of pathFilters) {
+    if (entry.startsWith("!")) negations.push(entry.slice(1));
+    else includes.push(entry);
+  }
+  let filtered = files;
+  if (includes.length > 0) {
+    filtered = filtered.filter((file) => includes.some((glob) => matchesManifestPath(file.path, glob)));
+  }
+  if (negations.length > 0) {
+    filtered = filtered.filter((file) => !negations.some((glob) => matchesManifestPath(file.path, glob)));
+  }
+  return filtered;
+}
+
+/** Filter changed files for the AI review path: drop `exclude_paths`, then apply `path_filters`. (#2043) */
+export function filterReviewFilesForAi<T extends { path: string }>(
+  files: T[],
+  excludePaths: string[],
+  pathFilters: string[],
+): T[] {
+  return applyReviewPathFilters(excludeReviewPaths(files, excludePaths), pathFilters);
 }
 
 /**

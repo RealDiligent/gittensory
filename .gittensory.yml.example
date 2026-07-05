@@ -562,6 +562,21 @@ settings:
   #                                     # Default: review-evasion.
   # reviewEvasionComment: true         # Post the public explanation comment before the enforcement close. Default: true.
 
+# Maintainer AI review tuning (`.gittensory.yml` top-level `review:` block). These knobs shape the advisory AI
+# review prompt and file selection only — gate/slop/secret-scan are unaffected.
+# review:
+#   # Globs whose matching files are dropped from the AI review (lockfiles, generated output, etc.).
+#   # Applied before path_filters. Empty/default ⇒ every file is reviewed.
+#   exclude_paths:
+#     - "**/*.lock"
+#     - "dist/**"
+#   # Include + `!`-negation globs that positively scope the AI review AFTER exclude_paths.
+#   # Plain entries restrict to matching paths; a leading `!` subtracts matches. Both `*` and `**` cross
+#   # directory slashes. Empty/default ⇒ every non-excluded file is reviewed (byte-identical).
+#   path_filters:
+#     - "src/**"
+#     - "!src/generated/**"
+
 # Per-repo activation overrides for the converged review features that ship behind a deployment-wide
 # GITTENSORY_REVIEW_* env kill-switch (rag/reputation/unifiedComment/safety). Each key is `true` (force on
 # for this repo, subject to the env flag still being enabled), `false` (force off), or omitted (falls back

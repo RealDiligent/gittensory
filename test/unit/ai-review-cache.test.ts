@@ -24,7 +24,8 @@ const baseFingerprintInput = (): AiReviewCacheInput => ({
   pathInstructions: [],
   pathGuidance: "",
   repoInstructions: null,
-  excludePaths: [],
+      excludePaths: [],
+      pathFilters: [],
   changedPaths: ["src/changed.ts"],
   features: {
     grounding: false,

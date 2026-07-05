@@ -26,6 +26,7 @@ const baseInput = (): AiReviewCacheInput => ({
   pathGuidance: "",
   repoInstructions: null,
   excludePaths: [],
+  pathFilters: [],
   changedPaths: ["src/a.ts"],
   features: {
     grounding: false,
@@ -41,12 +42,14 @@ describe("aiReviewCacheInputFingerprint", () => {
       ...baseInput(),
       changedPaths: [" src/b.ts ", "src/a.ts", "src/a.ts"],
       excludePaths: ["dist/**", " **/*.lock "],
+      pathFilters: [" src/** ", "!src/generated/**"],
       repoInstructions: "  Follow the repo guide.  ",
     });
     const right = await aiReviewCacheInputFingerprint({
       ...baseInput(),
       changedPaths: ["src/a.ts", "src/b.ts"],
       excludePaths: ["**/*.lock", "dist/**"],
+      pathFilters: ["src/**", "!src/generated/**"],
       repoInstructions: "Follow the repo guide.",
     });
 
@@ -70,6 +73,12 @@ describe("aiReviewCacheInputFingerprint", () => {
       features: { ...baseInput().features, rag: true },
     });
 
+    expect(updated).not.toBe(original);
+  });
+
+  it("changes when review path_filters change", async () => {
+    const original = await aiReviewCacheInputFingerprint({ ...baseInput(), pathFilters: ["src/**"] });
+    const updated = await aiReviewCacheInputFingerprint({ ...baseInput(), pathFilters: ["src/**", "!src/generated/**"] });
     expect(updated).not.toBe(original);
   });
 

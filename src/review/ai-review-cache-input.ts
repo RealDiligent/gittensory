@@ -79,6 +79,7 @@ export type AiReviewCacheInput = {
   pathGuidance: string;
   repoInstructions: string | null | undefined;
   excludePaths: readonly string[];
+  pathFilters: readonly string[];
   changedPaths: readonly string[];
   reviewFiles: readonly {
     path: string;
@@ -157,6 +158,7 @@ export async function aiReviewCacheInputFingerprint(input: AiReviewCacheInput): 
     pathGuidance: input.pathGuidance,
     repoInstructions: input.repoInstructions?.trim() || null,
     excludePaths: normalizeStringList(input.excludePaths),
+    pathFilters: normalizeStringList(input.pathFilters),
     changedPaths: normalizeStringList(input.changedPaths),
     reviewFiles: [...input.reviewFiles]
       .map((file) => ({
