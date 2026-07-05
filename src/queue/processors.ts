@@ -5652,7 +5652,8 @@ async function processGitHubWebhook(
           const createdAt = await getGithubUserCreatedAt(env, installationId, authorLogin);
           if (createdAt) {
             const ageDays = (Date.now() - Date.parse(createdAt)) / (24 * 60 * 60 * 1000);
-            if (ageDays < accountAgeThresholdDays && resolveAutonomy(issueSettings.autonomy, "review_state_label") === "auto") {
+            if (ageDays < accountAgeThresholdDays) {
+              if (resolveAutonomy(issueSettings.autonomy, "review_state_label") === "auto") {
               const newAccountMode = resolveAgentActionMode({
                 globalPaused: isGlobalAgentPause(env) || (await isGlobalAgentFrozen(env)),
                 agentPaused: issueSettings.agentPaused,
@@ -5669,6 +5670,7 @@ async function processGitHubWebhook(
                 /* v8 ignore next -- fail-safe: a label-application failure must never block the rest of the handler */
                 () => undefined,
               );
+              }
             }
           }
         }
