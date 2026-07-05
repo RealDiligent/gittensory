@@ -187,3 +187,4 @@ export { pickTopMetadataOpportunities } from "./metadata-top-pick.js";
 export { rankMetadataOpportunitiesAtOrAboveScore } from "./metadata-min-score.js";
 export { pickTopMetadataOpportunitiesAtOrAboveScore } from "./metadata-top-min-score.js";
 export { bestMetadataOpportunity } from "./metadata-best-pick.js";
+export { bestMetadataOpportunityAtOrAboveScore } from "./metadata-best-min-score.js";
