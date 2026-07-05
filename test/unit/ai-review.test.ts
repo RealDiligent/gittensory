@@ -24,6 +24,9 @@ const {
   dualAiTieBreakVerdictsOrderStable,
   resolveOrderSwappedDualAiTieBreakVerdict,
   mapDualAiTieBreakVerdictToCombineResult,
+  buildDualAiTieBreakJudgeUserPrompt,
+  runDualAiTieBreakJudgeCall,
+  resolveDualAiTieBreakWithOrderStability,
   synthesizeDefect,
   toPublicSafe,
   runWorkersOpinion,
@@ -1998,6 +2001,158 @@ describe("pure helpers", () => {
       expect(dualAiReviewersDisagree(blockedA, blockedB)).toBe(true);
       expect(dualAiReviewersDisagree(blockedA, blockedA)).toBe(false);
       expect(dualAiReviewersDisagree(clean, clean)).toBe(false);
+    });
+
+    it("parseDualAiTieBreakJudgeResponse rejects malformed favored values and invalid JSON", () => {
+      expect(parseDualAiTieBreakJudgeResponse("{")).toBeNull();
+      expect(
+        parseDualAiTieBreakJudgeResponse('{"favored":"reviewer_first"}'),
+      ).toBeNull();
+    });
+
+    it("buildDualAiTieBreakJudgeUserPrompt swaps reviewer presentation order", () => {
+      expect(buildDualAiTieBreakJudgeUserPrompt(blockedA, blockedB, false)).toContain(
+        "Null deref in src/a.ts",
+      );
+      const swapped = buildDualAiTieBreakJudgeUserPrompt(blockedA, blockedB, true);
+      expect(swapped.indexOf("Race in src/b.ts")).toBeLessThan(
+        swapped.indexOf("Null deref in src/a.ts"),
+      );
+    });
+
+    it("resolveOrderSwappedDualAiTieBreakVerdict carries consensusTitle on stable consensus", () => {
+      expect(
+        resolveOrderSwappedDualAiTieBreakVerdict({
+          normalOrder: {
+            verdict: "consensus",
+            consensusTitle: "Null deref in src/a.ts",
+          },
+          swappedOrder: {
+            verdict: "consensus",
+            consensusTitle: "Null deref in src/a.ts",
+          },
+        }),
+      ).toEqual({
+        stable: true,
+        verdict: "consensus",
+        consensusTitle: "Null deref in src/a.ts",
+      });
+    });
+
+    it("mapDualAiTieBreakVerdictToCombineResult handles missing reviews and unsafe consensus titles", () => {
+      expect(
+        mapDualAiTieBreakVerdictToCombineResult([blockedA], "reviewer_0"),
+      ).toEqual({ defect: null, split: false, inconclusive: true });
+      expect(
+        mapDualAiTieBreakVerdictToCombineResult(
+          [blockedA, clean],
+          "consensus",
+          "Boost your reward payout",
+        ),
+      ).toMatchObject({ defect: null, split: true, inconclusive: false });
+    });
+
+    it("runDualAiTieBreakJudgeCall parses judge output, retries unparseable responses, and uses the fallback model", async () => {
+      resetMetrics();
+      let primaryAttempts = 0;
+      const run = vi.fn(async (model: string) => {
+        if (model.includes("fallback")) {
+          return { response: '{"favored":"reviewer_1"}' };
+        }
+        primaryAttempts += 1;
+        return { response: "not-json" };
+      });
+      const env = createTestEnv({
+        AI: { run } as unknown as Ai,
+        AI_GATEWAY_ID: "gw-test",
+      });
+      const diagnostics: Array<{ status: string; model: string }> = [];
+      const parsed = await runDualAiTieBreakJudgeCall(
+        env,
+        "primary-model",
+        "fallback-model",
+        blockedA,
+        clean,
+        true,
+        diagnostics as never,
+        { jobId: "job-1", repoFullName: "acme/widgets", pullNumber: 7 },
+      );
+      expect(parsed?.verdict).toBe("reviewer_1");
+      expect(primaryAttempts).toBe(3);
+      expect(run).toHaveBeenCalledTimes(4);
+      expect(await renderMetrics()).toContain(
+        'gittensory_ai_review_model_fallback_total{fallback="fallback-model",primary="primary-model"} 1',
+      );
+      expect(diagnostics.some((d) => d.status === "unparseable_output")).toBe(true);
+      expect(diagnostics.some((d) => d.status === "parsed")).toBe(true);
+    });
+
+    it("resolveDualAiTieBreakWithOrderStability returns orderUnstable only for parsed order disagreement", async () => {
+      let judgeCalls = 0;
+      const run = vi.fn(async () => {
+        judgeCalls += 1;
+        const favored = judgeCalls === 1 ? "reviewer_0" : "reviewer_0";
+        return { response: JSON.stringify({ favored }) };
+      });
+      const env = createTestEnv({ AI: { run } as unknown as Ai });
+      const unstable = await resolveDualAiTieBreakWithOrderStability({
+        env,
+        model: "primary-model",
+        fallback: "primary-model",
+        reviewA: blockedA,
+        reviewB: clean,
+        diagnostics: [],
+      });
+      expect(unstable).toEqual({
+        stable: false,
+        verdict: "inconclusive",
+        orderUnstable: true,
+      });
+    });
+
+    it("swap-stable consensus tie-break resolves conflicting blockers via judge title", async () => {
+      resetMetrics();
+      let aiCalls = 0;
+      let judgeCalls = 0;
+      const run = vi.fn(async (_model: string, payload: { messages?: Array<{ role: string; content: string }> }) => {
+        aiCalls += 1;
+        const system = payload.messages?.[0]?.content ?? "";
+        if (system.includes("impartial judge")) {
+          judgeCalls += 1;
+          return {
+            response: JSON.stringify({
+              favored: "consensus",
+              consensusTitle: "Null deref in src/a.ts",
+            }),
+          };
+        }
+        return {
+          response: reviewJson({
+            present: true,
+            title: aiCalls === 1 ? "Null deref in src/a.ts" : "Race in src/b.ts",
+          }),
+        };
+      });
+      const env = createTestEnv({
+        AI: { run } as unknown as Ai,
+        AI_SUMMARIES_ENABLED: "true",
+        AI_PUBLIC_COMMENTS_ENABLED: "true",
+        AI_DAILY_NEURON_BUDGET: "100000",
+      });
+      const result = await runGittensoryAiReview(env, { ...baseInput, mode: "block" });
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") throw new Error("expected ok");
+      expect(result.consensusDefect?.title).toContain("Null deref");
+      expect(judgeCalls).toBe(2);
+    });
+
+    it("dualAiTieBreakVerdictsOrderStable rejects mixed inconclusive and decisive verdicts", () => {
+      expect(
+        dualAiTieBreakVerdictsOrderStable(
+          { verdict: "inconclusive" },
+          { verdict: "reviewer_0" },
+        ),
+      ).toBe(false);
     });
 
     it("parseDualAiTieBreakJudgeResponse parses favored + consensusTitle", () => {
