@@ -2736,6 +2736,9 @@ describe("review.auto_review (#1954 / #2038–#2041)", () => {
     expect(bad.warnings.some((w) => /auto_pause_after_reviewed_commits.*non-negative integer/.test(w))).toBe(true);
     const floatBad = parseFocusManifest({ review: { auto_review: { auto_pause_after_reviewed_commits: 1.5 } } });
     expect(floatBad.review.autoReview.autoPauseAfterReviewedCommits).toBeNull();
+    const stringBad = parseFocusManifest({ review: { auto_review: { auto_pause_after_reviewed_commits: "3" } } });
+    expect(stringBad.review.autoReview.autoPauseAfterReviewedCommits).toBeNull();
+    expect(stringBad.warnings.some((w) => /auto_pause_after_reviewed_commits.*non-negative integer/.test(w))).toBe(true);
     expect(reviewConfigToJson(ok.review)).toEqual({ auto_review: { auto_pause_after_reviewed_commits: 3 } });
     expect(reviewConfigToJson(zero.review)).toEqual({ auto_review: { auto_pause_after_reviewed_commits: 0 } });
   });

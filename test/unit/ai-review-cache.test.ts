@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getCachedAiReview, getLatestPublishedAiReview, markAiReviewPublished, putCachedAiReview } from "../../src/db/repositories";
+import { countPublishedAiReviewHeads, getCachedAiReview, getLatestPublishedAiReview, markAiReviewPublished, putCachedAiReview } from "../../src/db/repositories";
 import { aiReviewCacheInputFingerprint, type AiReviewCacheInput } from "../../src/review/ai-review-cache-input";
 import { createTestEnv } from "../helpers/d1";
 
@@ -463,6 +463,25 @@ describe("AI review cache (#1)", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("countPublishedAiReviewHeads — auto_pause_after_reviewed_commits (#2042)", () => {
+    it("returns 0 when no published reviews exist for the PR", async () => {
+      const env = createTestEnv();
+      await putCachedAiReview(env, "o/r", 60, "sha1", "block", { notes: "unpublished", reviewerCount: 1 });
+      expect(await countPublishedAiReviewHeads(env, "o/r", 60)).toBe(0);
+      expect(await countPublishedAiReviewHeads(env, "o/r", 99)).toBe(0);
+    });
+
+    it("counts distinct published head SHAs and ignores unpublished rows", async () => {
+      const env = createTestEnv();
+      await putCachedAiReview(env, "o/r", 61, "sha1", "block", { notes: "first", reviewerCount: 1 });
+      await markAiReviewPublished(env, "o/r", 61, "sha1");
+      await putCachedAiReview(env, "o/r", 61, "sha2", "block", { notes: "second", reviewerCount: 1 });
+      await markAiReviewPublished(env, "o/r", 61, "sha2");
+      await putCachedAiReview(env, "o/r", 61, "sha3", "block", { notes: "pending", reviewerCount: 1 });
+      expect(await countPublishedAiReviewHeads(env, "o/r", 61)).toBe(2);
     });
   });
 });
