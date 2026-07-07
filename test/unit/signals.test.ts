@@ -471,6 +471,21 @@ describe("world-class backend signals", () => {
     expect(result.findings.map((finding) => finding.code)).toContain("missing_test_evidence");
   });
 
+  it("does not flag missing test evidence for generated Dart part files (engine delegates to path-matchers)", () => {
+    const result = buildPreflightResult(
+      {
+        repoFullName: repo.fullName,
+        title: "Regenerate freezed models",
+        body: "Fixes #7",
+        changedFiles: ["lib/models/user.g.dart", "lib/models/user.freezed.dart"],
+      },
+      repo,
+      issues,
+      pullRequests,
+    );
+    expect(result.findings.map((finding) => finding.code)).not.toContain("missing_test_evidence");
+  });
+
   it("gates public comments to detected contributors and sanitizes comment text", () => {
     const currentPr = pullRequests[0]!;
     const priorPr: PullRequestRecord = {
