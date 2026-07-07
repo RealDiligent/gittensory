@@ -2332,6 +2332,28 @@ describe("parseFocusManifest settings override + resolveEffectiveSettings", () =
     expect(eff.badgeEnabled).toBe(true); // settings: override wins over the DB-stored value
   });
 
+  it("wires settings.includeMaintainerAuthors into the manifest parser and resolver (#2052)", () => {
+    const parsedTrue = parseFocusManifest({ settings: { includeMaintainerAuthors: true } });
+    expect(parsedTrue.settings.includeMaintainerAuthors).toBe(true);
+    expect(parsedTrue.warnings).toEqual([]);
+    const parsedFalse = parseFocusManifest({ settings: { includeMaintainerAuthors: false } });
+    expect(parsedFalse.settings.includeMaintainerAuthors).toBe(false);
+
+    const invalid = parseFocusManifest({ settings: { includeMaintainerAuthors: "yes" } });
+    expect(invalid.settings.includeMaintainerAuthors).toBeUndefined();
+    expect(invalid.warnings.some((w) => /settings\.includeMaintainerAuthors/.test(w))).toBe(true);
+
+    const db = { includeMaintainerAuthors: false } as unknown as RepositorySettings;
+    const eff = resolveEffectiveSettings(db, parseFocusManifest({ settings: { includeMaintainerAuthors: true } }));
+    expect(eff.includeMaintainerAuthors).toBe(true);
+
+    const noOverride = resolveEffectiveSettings({ includeMaintainerAuthors: true } as unknown as RepositorySettings, parseFocusManifest({}));
+    expect(noOverride.includeMaintainerAuthors).toBe(true);
+
+    const reparsed = parseFocusManifest({ settings: settingsOverrideToJson(parsedTrue.settings) });
+    expect(reparsed.settings.includeMaintainerAuthors).toBe(true);
+  });
+
   it("wires settings.publicQualityMetrics into the manifest parser and lets it override the DB value (#2568)", () => {
     const parsedTrue = parseFocusManifest({ settings: { publicQualityMetrics: true } });
     expect(parsedTrue.settings.publicQualityMetrics).toBe(true);
