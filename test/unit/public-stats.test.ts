@@ -222,6 +222,18 @@ describe("getPublicStats — live aggregate over the review ledger", () => {
     expect(out.totals.closed).toBe(724 + 30);
     expect(out.totals.handled).toBe(2742 + 80);
     expect(out.totals.reviewed).toBe(1442 + 754 + 626); // reviewedOf = merged + closed + commented + manual
+    // Own-ledger flat fallback + Orb fleet flat credit (Orb has no per-PR effort metadata in this module).
+    expect(out.totals.minutesSaved).toBe(2742 * MINUTES_SAVED_PER_PR + 80 * MINUTES_SAVED_PER_PR);
+  });
+
+  it("keeps own-ledger per-PR effort sum separate from Orb fleet flat credit", async () => {
+    const withOrbAndEffort = (sql: string): Row[] => {
+      if (sql.includes("orb_pr_outcomes")) return [{ merged: 10, closed: 5, total: 15 }];
+      if (isEffort(sql)) return [{ totalMinutes: 100 }];
+      return ledger(sql);
+    };
+    const out = await getPublicStats(stubEnv(withOrbAndEffort), NOW);
+    expect(out.totals.minutesSaved).toBe(100 + 15 * MINUTES_SAVED_PER_PR);
   });
 
   it("does not exclude any account from the Orb aggregate (own-ledger side is a frozen snapshot, not live-overlapping)", async () => {

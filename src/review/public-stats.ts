@@ -313,6 +313,7 @@ export async function getPublicStats(
   // homepage reflects the whole fleet. No excludeAccount here (see the file header) -- reversals/weekly stay
   // own-ledger-only (the Orb aggregate only captures merged/closed, not reversals or a trailing-7-day split). The
   // total grows automatically as more installations register, self-hosted or otherwise.
+  const ownLedgerReviewed = reviewedOf(totals);
   const orb = await getOrbGlobalStats(env);
   totals.merged += orb.merged;
   totals.closed += orb.closed;
@@ -320,11 +321,13 @@ export async function getPublicStats(
 
   const reviewed = reviewedOf(totals);
   const w = weeklyRows[0] ?? { reviewed: 0, merged: 0 };
-  // review-effort minutes (#1955/#2070): sum per-PR estimates with MINUTES_SAVED_PER_PR fallback for missing
-  // rows; an empty effort subquery (no allowlisted publishes) degrades to reviewed * MINUTES_SAVED_PER_PR.
+  // review-effort minutes (#1955/#2070): own-ledger publishes sum per-PR estimates (COALESCE fallback); Orb fleet
+  // outcomes have no persisted effort metadata here, so they still credit the flat MINUTES_SAVED_PER_PR constant.
   const minutesSavedTotal = effortRows[0]?.totalMinutes;
+  const ownLedgerMinutes =
+    minutesSavedTotal != null ? minutesSavedTotal : ownLedgerReviewed * MINUTES_SAVED_PER_PR;
   const minutesSaved =
-    reviewed === 0 ? 0 : Math.round(minutesSavedTotal ?? reviewed * MINUTES_SAVED_PER_PR);
+    reviewed === 0 ? 0 : Math.round(ownLedgerMinutes + orb.total * MINUTES_SAVED_PER_PR);
   return {
     generatedAt,
     updatedAt: generatedAt,
