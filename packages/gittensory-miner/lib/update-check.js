@@ -46,7 +46,7 @@ export function shouldSkipUpdateCheck(cliArgs, env = process.env) {
 }
 
 function parseSemver(version) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(
     String(version ?? "").trim(),
   );
   if (!match) return null;

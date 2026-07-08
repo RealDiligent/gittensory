@@ -160,6 +160,7 @@ describe("gittensory-miner startup update check (#2331)", () => {
     expect(compareSemver("0.1.0", "0.1.0")).toBe(0);
     expect(compareSemver("0.5.0", "0.5.0-rc.1")).toBe(1);
     expect(compareSemver("0.6.0", "0.7.0-rc.1")).toBe(-1);
+    expect(compareSemver("0.6.0 trailing", "0.6.0")).toBeNull();
   });
 
   it("REGRESSION: compares numeric prerelease identifiers as decimal strings, not via Number() (precision loss past 2^53-1)", () => {
