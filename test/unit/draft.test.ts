@@ -888,6 +888,19 @@ describe("handleDraftCreate — nested body.fields branch + title fallbacks", ()
     expect(authUrl.searchParams.get("redirect_uri")).toBe("http://localhost/v1/drafts/auth/callback");
   });
 
+  it("treats a missing PUBLIC_API_ORIGIN property like unset for localhost dev fallback", async () => {
+    const env = draftEnv();
+    delete (env as { PUBLIC_API_ORIGIN?: string }).PUBLIC_API_ORIGIN;
+    const res = await handleDraftCreate(
+      new Request("http://localhost/v1/drafts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(SAMPLE_FIELDS) }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { authUrl: string };
+    const authUrl = new URL(body.authUrl);
+    expect(authUrl.searchParams.get("redirect_uri")).toBe("http://localhost/v1/drafts/auth/callback");
+  });
+
   it("falls back to 127.0.0.1 request origin when PUBLIC_API_ORIGIN is unset (dev-only path)", async () => {
     const env = draftEnv({ PUBLIC_API_ORIGIN: "" });
     const res = await handleDraftCreate(
