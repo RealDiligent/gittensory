@@ -58,6 +58,14 @@ function draftSecrets(env: Env): { clientId: string; clientSecret: string; encKe
   };
 }
 
+function trustedDraftOAuthOrigin(env: Env, requestUrl: string): string {
+  const configured = String(env.PUBLIC_API_ORIGIN ?? "").trim();
+  if (configured) return new URL(configured).origin;
+  const requestOrigin = new URL(requestUrl).origin;
+  if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i.test(requestOrigin)) return requestOrigin;
+  throw new Error("draft_flow_not_configured");
+}
+
 interface DraftRow {
   id: string;
   status: string;
@@ -574,7 +582,12 @@ export async function handleDraftCreate(request: Request, env: Env): Promise<Res
     .bind(id, target.category, target.slug, target.targetPath, target.branchName, config.baseRef, JSON.stringify(fields), await sha256Hex(state))
     .run();
 
-  const origin = new URL(request.url).origin;
+  let origin: string;
+  try {
+    origin = trustedDraftOAuthOrigin(env, request.url);
+  } catch {
+    return json({ ok: false, error: "draft_flow_not_configured" }, 503);
+  }
   const authUrl = new URL("https://github.com/login/oauth/authorize");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", `${origin}/v1/drafts/auth/callback`);
@@ -635,10 +648,16 @@ export async function handleDraftOAuthCallback(request: Request, env: Env): Prom
 
   const { clientId, clientSecret, encKey } = draftSecrets(env);
   if (!clientId || !clientSecret || !encKey) return new Response("Draft flow not configured.", { status: 503 });
+  let callbackOrigin: string;
+  try {
+    callbackOrigin = trustedDraftOAuthOrigin(env, request.url);
+  } catch {
+    return new Response("Draft flow not configured.", { status: 503 });
+  }
 
   let userToken: string;
   try {
-    userToken = await exchangeGitHubUserCode({ clientId, clientSecret, code, callbackUrl: `${url.origin}/v1/drafts/auth/callback` });
+    userToken = await exchangeGitHubUserCode({ clientId, clientSecret, code, callbackUrl: `${callbackOrigin}/v1/drafts/auth/callback` });
   } catch {
     return new Response("GitHub authorization failed.", { status: 400 });
   }
@@ -657,7 +676,7 @@ export async function handleDraftOAuthCallback(request: Request, env: Env): Prom
   await env.JOBS.send({ type: "submit-draft", requestedBy: "api", draftId });
 
   return new Response(`<meta http-equiv="refresh" content="0; url=/v1/drafts/${draftId}">Submission queued.`, {
-    headers: { "content-type": "text/html", "set-cookie": draftOAuthCookie("", url.origin, 0) },
+    headers: { "content-type": "text/html", "set-cookie": draftOAuthCookie("", callbackOrigin, 0) },
   });
 }
 

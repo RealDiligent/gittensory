@@ -12,6 +12,7 @@ function draftEnv(overrides: Partial<Env> = {}): Env {
     GITHUB_OAUTH_CLIENT_ID: "Iv-test-client-id",
     GITHUB_OAUTH_CLIENT_SECRET: "test-oauth-client-secret",
     DRAFT_TOKEN_ENCRYPTION_SECRET: DRAFT_SECRET,
+    PUBLIC_API_ORIGIN: ORIGIN,
     ...overrides,
   });
 }
@@ -92,9 +93,8 @@ describe("draft endpoints — flag ON, public + unauthenticated", () => {
     const authUrl = new URL(body.authUrl);
     expect(authUrl.origin + authUrl.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(authUrl.searchParams.get("client_id")).toBe("Iv-test-client-id");
-    // The callback URL is derived from the request origin (matches reviewbot). `app.request` with a
-    // path-only URL resolves the origin to http://localhost, so the redirect_uri lives under it.
-    expect(authUrl.searchParams.get("redirect_uri")).toBe("http://localhost/v1/drafts/auth/callback");
+    // The callback URL is anchored to PUBLIC_API_ORIGIN.
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(`${ORIGIN}/v1/drafts/auth/callback`);
     expect(authUrl.searchParams.get("state")?.startsWith(`${body.draftId}.`)).toBe(true);
     expect(res.headers.get("set-cookie")).toContain("gittensory_draft_oauth=");
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
@@ -872,6 +872,28 @@ describe("handleDraftCreate — nested body.fields branch + title fallbacks", ()
   it("returns 503 when the OAuth client id is missing (draftSecrets clientId empty branch)", async () => {
     const env = draftEnv({ GITHUB_OAUTH_CLIENT_ID: "" });
     const res = await handleDraftCreate(new Request(`${ORIGIN}/v1/drafts`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(SAMPLE_FIELDS) }), env);
+    expect(res.status).toBe(503);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "draft_flow_not_configured" });
+  });
+
+  it("falls back to localhost request origin when PUBLIC_API_ORIGIN is unset (dev-only path)", async () => {
+    const env = draftEnv({ PUBLIC_API_ORIGIN: "" });
+    const res = await handleDraftCreate(
+      new Request("http://localhost/v1/drafts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(SAMPLE_FIELDS) }),
+      env,
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { authUrl: string };
+    const authUrl = new URL(body.authUrl);
+    expect(authUrl.searchParams.get("redirect_uri")).toBe("http://localhost/v1/drafts/auth/callback");
+  });
+
+  it("returns 503 when PUBLIC_API_ORIGIN is unset for non-localhost origins", async () => {
+    const env = draftEnv({ PUBLIC_API_ORIGIN: "" });
+    const res = await handleDraftCreate(
+      new Request(`${ORIGIN}/v1/drafts`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(SAMPLE_FIELDS) }),
+      env,
+    );
     expect(res.status).toBe(503);
     expect((await res.json()) as { error: string }).toMatchObject({ error: "draft_flow_not_configured" });
   });
