@@ -73,7 +73,7 @@ export function classifyMcpClientVersion(version: string | null | undefined): Mc
 }
 
 function parseSemver(version: string) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(version.trim());
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version.trim());
   if (!match) return null;
   return {
     major: Number(match[1]),

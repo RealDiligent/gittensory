@@ -148,6 +148,8 @@ describe("MCP compatibility telemetry", () => {
     expect(compareMcpSemver("0.3.0-rc.1", "0.3.0-rc.1")).toBe(0);
     expect(compareMcpSemver("0.3.0-RC.1", "0.3.0-rc.1")).toBe(0);
     expect(compareMcpSemver("v0.3.0", "0.3.0")).toBe(0);
+    // Trailing non-semver junk must invalidate the version, not be silently accepted.
+    expect(compareMcpSemver("0.3.0 trailing", "0.3.0")).toBeNull();
     expect(compareMcpSemver("bad", "0.3.0")).toBeNull();
   });
 });
