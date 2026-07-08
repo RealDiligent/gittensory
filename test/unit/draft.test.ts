@@ -900,6 +900,18 @@ describe("handleDraftCreate — nested body.fields branch + title fallbacks", ()
     expect(row?.n).toBe(0);
   });
 
+  it("returns 503 when PUBLIC_API_ORIGIN is malformed", async () => {
+    const env = draftEnv({ PUBLIC_API_ORIGIN: "not-a-valid-url" });
+    const res = await handleDraftCreate(
+      new Request(`${ORIGIN}/v1/drafts`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(SAMPLE_FIELDS) }),
+      env,
+    );
+    expect(res.status).toBe(503);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "draft_flow_not_configured" });
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM submission_drafts").first<{ n: number }>();
+    expect(row?.n).toBe(0);
+  });
+
   it("returns 404 when the flag is off (handleDraftCreate guard)", async () => {
     const env = createTestEnv(); // flag unset
     const res = await handleDraftCreate(new Request(`${ORIGIN}/v1/drafts`, { method: "POST", headers: jsonHeaders(), body: JSON.stringify(SAMPLE_FIELDS) }), env);
@@ -1293,6 +1305,25 @@ describe("handleDraftOAuthCallback — extra guards", () => {
     const res = await handleDraftOAuthCallback(
       new Request(`${ORIGIN}/v1/drafts/auth/callback?code=valid&state=${encodeURIComponent(state)}`, { headers: callbackHeaders(cookie) }),
       env,
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("Draft flow not configured.");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("returns 503 in callback when PUBLIC_API_ORIGIN is malformed", async () => {
+    const app = createApp();
+    const createEnv = draftEnv({ PUBLIC_API_ORIGIN: ORIGIN });
+    const created = await app.request("/v1/drafts", { method: "POST", headers: jsonHeaders(), body: JSON.stringify(SAMPLE_FIELDS) }, createEnv);
+    const payload = (await created.json()) as { authUrl: string };
+    const state = new URL(payload.authUrl).searchParams.get("state") ?? "";
+    const cookie = created.headers.get("set-cookie") ?? "";
+    const callbackEnv = draftEnv({ PUBLIC_API_ORIGIN: "not-a-valid-url", DB: createEnv.DB });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await handleDraftOAuthCallback(
+      new Request(`${ORIGIN}/v1/drafts/auth/callback?code=valid&state=${encodeURIComponent(state)}`, { headers: callbackHeaders(cookie) }),
+      callbackEnv,
     );
     expect(res.status).toBe(503);
     expect(await res.text()).toBe("Draft flow not configured.");
