@@ -17,8 +17,8 @@ export function CycleTimeCard({ cycleTime }: { cycleTime: CycleTimeAggregate }) 
         <div>
           <h2 className="font-display text-token-lg font-semibold">Review cycle time</h2>
           <p className="mt-1 text-token-xs text-muted-foreground">
-            Gate decision → PR outcome duration percentiles from review_audit. Public-safe aggregates
-            only.
+            Gate decision → PR outcome duration percentiles from review_audit. Public-safe
+            aggregates only.
           </p>
         </div>
         <StatusPill status={hasSamples ? "ready" : "info"}>
@@ -54,8 +54,8 @@ export function CycleTimeCard({ cycleTime }: { cycleTime: CycleTimeAggregate }) 
         </>
       ) : (
         <p className="mt-4 text-token-sm text-muted-foreground">
-          Paired gate decisions and PR outcomes will appear here once the gate has resolved pull requests
-          in the analytics window.
+          Paired gate decisions and PR outcomes will appear here once the gate has resolved pull
+          requests in the analytics window.
         </p>
       )}
     </section>
