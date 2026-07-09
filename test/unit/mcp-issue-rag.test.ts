@@ -61,6 +61,7 @@ describe("MCP gittensory_retrieve_issue_context", () => {
       repoFullName: "acme/widgets",
       reason: "issue_query_below_retrieval_floor",
     });
+    expect(JSON.stringify(result.content)).toContain("below the retrieval floor");
   });
 
   it("returns metadata-only retrieval telemetry and never leaks source text", async () => {
@@ -86,6 +87,62 @@ describe("MCP gittensory_retrieve_issue_context", () => {
     expect(data.telemetry.retrievedPaths).toEqual(["src/helper.ts"]);
     const text = JSON.stringify(result);
     expect(text).not.toMatch(/export function helper|RELEVANT EXISTING CODE|wallet|hotkey|reward/i);
+    expect(JSON.stringify(result.content)).toContain("metadata-only context for 1 related path.");
+  });
+
+  it("summarizes empty retrieval when the hosted backend is unavailable", async () => {
+    const env = createTestEnv();
+    const client = await connect(env);
+    const result = await client.callTool({
+      name: "gittensory_retrieve_issue_context",
+      arguments: {
+        owner: "acme",
+        repo: "widgets",
+        title: "Improve SQLite backup readiness checks",
+        body: "Operators need restore guidance tied to the existing self-host backup flow.",
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      status: "ok",
+      telemetry: { injected: false, retrievedPathCount: 0 },
+    });
+    expect(JSON.stringify(result.content)).toContain("found no issue-centric RAG context");
+  });
+
+  it("uses plural path wording when multiple related paths are retrieved", async () => {
+    const env = createTestEnv({
+      DB: ragDbStub({
+        chunkRows: [
+          { id: "v1", text: "export function helper() { return 1; }" },
+          { id: "v2", text: "export function backup() { return 2; }" },
+        ],
+      }),
+      VECTORIZE: vectorizeStub([
+        { id: "v1", score: 0.92, metadata: { path: "src/helper.ts" } },
+        { id: "v2", score: 0.88, metadata: { path: "src/backup.ts" } },
+      ]) as unknown as Vectorize,
+      AI: aiStub() as unknown as Ai,
+    });
+    const client = await connect(env);
+    const result = await client.callTool({
+      name: "gittensory_retrieve_issue_context",
+      arguments: {
+        owner: "acme",
+        repo: "widgets",
+        title: "Improve SQLite backup readiness checks",
+        body: "Operators need restore guidance tied to the existing self-host backup flow.",
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({
+      status: "ok",
+      telemetry: { injected: true, retrievedPathCount: 2 },
+    });
+    expect((result.structuredContent as { telemetry: { retrievedPaths: string[] } }).telemetry.retrievedPaths.sort()).toEqual(
+      ["src/backup.ts", "src/helper.ts"],
+    );
+    expect(JSON.stringify(result.content)).toContain("metadata-only context for 2 related paths.");
   });
 
   it("rejects out-of-scope repo access for extension-contributor sessions", async () => {
@@ -109,21 +166,23 @@ describe("MCP gittensory_retrieve_issue_context", () => {
 
 const VEC_1024 = Array.from({ length: 1024 }, () => 0.01);
 
-function ragDbStub() {
+function ragDbStub(opts: { count?: number; chunkRows?: Array<{ id: string; text: string }> } = {}) {
+  const count = opts.count ?? 5;
+  const chunkRows = opts.chunkRows ?? [{ id: "v1", text: "export function helper() { return 1; }" }];
   const prepared = (sql: string) => ({
     bind: (..._values: unknown[]) => ({
-      first: vi.fn(async () => (/COUNT\(\*\)/i.test(sql) ? { n: 5 } : null)),
-      all: vi.fn(async () => ({ results: /SELECT id, text/i.test(sql) ? [{ id: "v1", text: "export function helper() { return 1; }" }] : [] })),
+      first: vi.fn(async () => (/COUNT\(\*\)/i.test(sql) ? { n: count } : null)),
+      all: vi.fn(async () => ({ results: /SELECT id, text/i.test(sql) ? chunkRows : [] })),
       run: vi.fn(async () => undefined),
     }),
   });
   return { prepare: vi.fn((sql: string) => prepared(sql)), batch: vi.fn(async () => []) } as unknown as D1Database;
 }
 
-function vectorizeStub() {
+function vectorizeStub(matches = [{ id: "v1", score: 0.92, metadata: { path: "src/helper.ts" } }]) {
   return {
     upsert: vi.fn(async () => ({ mutationId: "m1" })),
-    query: vi.fn(async () => ({ matches: [{ id: "v1", score: 0.92, metadata: { path: "src/helper.ts" } }] })),
+    query: vi.fn(async () => ({ matches })),
     deleteByIds: vi.fn(async () => ({ mutationId: "m2" })),
   };
 }
