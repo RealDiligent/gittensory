@@ -1,7 +1,6 @@
-import {
-  formatOpportunityBadge,
-  lookupRankedOpportunity,
-} from "./opportunity-badge.js";
+import "./opportunity-badge.js";
+
+const badgeApi = globalThis.__gittensoryMinerOpportunityBadge;
 
 const PING_MESSAGE = "gittensory-miner:ping";
 const ISSUE_CONTEXT_MESSAGE = "gittensory-miner:issue-context";
@@ -39,7 +38,7 @@ async function loadIssueOpportunityContext(message) {
   }
 
   const rankedCandidates = await loadRankedCandidates();
-  const rankedEntry = lookupRankedOpportunity(rankedCandidates, repoFullName, message.issueNumber);
+  const rankedEntry = badgeApi.lookupRankedOpportunity(rankedCandidates, repoFullName, message.issueNumber);
   if (!rankedEntry) {
     return {
       watched: true,
@@ -54,7 +53,7 @@ async function loadIssueOpportunityContext(message) {
     watched: true,
     issueNumber: message.issueNumber,
     repoFullName,
-    badge: formatOpportunityBadge(rankedEntry),
+    badge: badgeApi.formatOpportunityBadge(rankedEntry),
     status: "ready",
   };
 }

@@ -18,6 +18,6 @@ available for the current issue.
 ## Local ranked cache
 
 Laptop-mode installs can paste JSON from a miner `discover` run into the options page. The extension stores that list in
-`chrome.storage.local.rankedCandidates` and looks up the current issue there. A hosted discovery-index URL can be saved
-for future client support; when only unranked hosted metadata is available, the badge degrades gracefully by staying
-hidden.
+`chrome.storage.local.rankedCandidates` and looks up the current issue there. A discovery-index URL can be saved for a
+future hosted client path; it is not read yet, so when only unranked hosted metadata would be available the badge
+degrades gracefully by staying hidden.

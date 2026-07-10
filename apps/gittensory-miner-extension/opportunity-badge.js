@@ -1,11 +1,11 @@
-export function issueLookupKey(repoFullName, issueNumber) {
+function issueLookupKey(repoFullName, issueNumber) {
   const repo = String(repoFullName ?? "").trim().toLowerCase();
   const number = Number(issueNumber);
   if (!repo || !Number.isInteger(number) || number <= 0) return null;
   return `${repo}#${number}`;
 }
 
-export function lookupRankedOpportunity(rankedIssues, repoFullName, issueNumber) {
+function lookupRankedOpportunity(rankedIssues, repoFullName, issueNumber) {
   const targetKey = issueLookupKey(repoFullName, issueNumber);
   if (!targetKey || !Array.isArray(rankedIssues)) return null;
   for (const entry of rankedIssues) {
@@ -16,7 +16,7 @@ export function lookupRankedOpportunity(rankedIssues, repoFullName, issueNumber)
   return null;
 }
 
-export function scoreToTier(rankScore) {
+function scoreToTier(rankScore) {
   const score = Number(rankScore);
   if (!Number.isFinite(score)) return "Unknown";
   if (score >= 0.75) return "High";
@@ -24,7 +24,7 @@ export function scoreToTier(rankScore) {
   return "Low";
 }
 
-export function buildOpportunityWhy(entry) {
+function buildOpportunityWhy(entry) {
   const reasons = [];
   if (Number(entry.laneFit) >= 0.7) reasons.push("Strong lane fit");
   if (Number(entry.freshness) >= 0.7) reasons.push("Fresh issue");
@@ -35,7 +35,7 @@ export function buildOpportunityWhy(entry) {
   return reasons.slice(0, 2).join("; ");
 }
 
-export function formatOpportunityBadge(entry) {
+function formatOpportunityBadge(entry) {
   const rankScore = Number(entry.rankScore);
   return {
     tier: scoreToTier(rankScore),
@@ -45,7 +45,7 @@ export function formatOpportunityBadge(entry) {
   };
 }
 
-export function escapeOpportunityHtml(value) {
+function escapeOpportunityHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
     switch (char) {
       case "&":
@@ -62,7 +62,7 @@ export function escapeOpportunityHtml(value) {
   });
 }
 
-export function renderOpportunityBadgeMarkup(badge) {
+function renderOpportunityBadgeMarkup(badge) {
   if (!badge || typeof badge !== "object") return "";
   return `
     <div class="gittensory-miner-opportunity-badge__header">
@@ -78,14 +78,18 @@ export function renderOpportunityBadgeMarkup(badge) {
   `;
 }
 
-if (typeof globalThis !== "undefined") {
-  globalThis.__gittensoryMinerOpportunityBadge = {
-    issueLookupKey,
-    lookupRankedOpportunity,
-    scoreToTier,
-    buildOpportunityWhy,
-    formatOpportunityBadge,
-    escapeOpportunityHtml,
-    renderOpportunityBadgeMarkup,
-  };
+const opportunityBadgeApi = {
+  issueLookupKey,
+  lookupRankedOpportunity,
+  scoreToTier,
+  buildOpportunityWhy,
+  formatOpportunityBadge,
+  escapeOpportunityHtml,
+  renderOpportunityBadgeMarkup,
+};
+
+globalThis.__gittensoryMinerOpportunityBadge = opportunityBadgeApi;
+
+if (globalThis.__GITTENSORY_MINER_EXTENSION_TEST__) {
+  globalThis.__gittensoryMinerOpportunityBadgeTestExports = opportunityBadgeApi;
 }

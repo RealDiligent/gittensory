@@ -34,6 +34,10 @@ afterEach(() => {
 });
 
 describe("miner extension opportunity badge", () => {
+  it("ships browser-loadable content scripts without ESM export syntax", () => {
+    expect(badgeScript).not.toMatch(/\bexport\s+/);
+  });
+
   it("ships a Manifest V3 issue-page content script with badge assets", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.content_scripts[0].matches).toEqual(["https://github.com/*/*/issues/*"]);
@@ -157,12 +161,13 @@ function createMockContainer() {
 }
 
 function loadBadgeInternals() {
-  const context: Record<string, unknown> = { globalThis: {} as Record<string, unknown> };
+  const context: Record<string, unknown> = {
+    __GITTENSORY_MINER_EXTENSION_TEST__: true,
+  };
   context.globalThis = context;
   const vmContext = createContext(context);
-  const badgeForVm = badgeScript.replace(/\bexport\s+/g, "");
-  new Script(badgeForVm).runInContext(vmContext);
-  return vmContext.__gittensoryMinerOpportunityBadge as {
+  new Script(badgeScript).runInContext(vmContext);
+  return vmContext.__gittensoryMinerOpportunityBadgeTestExports as {
     lookupRankedOpportunity: (ranked: unknown[], repoFullName: string, issueNumber: number) => Record<string, unknown> | null;
     formatOpportunityBadge: (entry: Record<string, unknown>) => { tier: string; score: string; why: string };
     renderOpportunityBadgeMarkup: (badge: { tier: string; score: string; why: string }) => string;
@@ -213,9 +218,8 @@ function loadBackgroundInternals({
   };
   context.globalThis = context;
   const vmContext = createContext(context);
-  const badgeForVm = badgeScript.replace(/\bexport\s+/g, "");
-  new Script(badgeForVm).runInContext(vmContext);
-  const backgroundForTest = backgroundScript.replace(/^import\s+[\s\S]*?from\s+["'][^"']+["'];\s*/m, "");
+  new Script(badgeScript).runInContext(vmContext);
+  const backgroundForTest = backgroundScript.replace(/^import\s+["'][^"']+["'];\s*/m, "");
   new Script(backgroundForTest).runInContext(vmContext);
   return vmContext.__gittensoryMinerBackgroundInternals as {
     loadIssueOpportunityContext: (message: {
