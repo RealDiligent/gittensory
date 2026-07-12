@@ -16,6 +16,9 @@ Current scope is intentionally small:
 Environment variables read by the miner are documented in [`docs/env-reference.md`](docs/env-reference.md).
 Regenerate that file with `npm run miner:env-reference` from the repo root after adding or removing env reads.
 
+Config precedence (`.gittensory-miner.yml` vs operator env vs CLI flags) is documented in
+[`docs/config-precedence.md`](docs/config-precedence.md).
+
 Real miner commands land in follow-up issues.
 
 The package also includes the first metadata-only discovery primitive: `fetchCandidateIssues` lists open issue
