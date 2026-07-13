@@ -133,6 +133,18 @@ describe("gittensory-miner event ledger CLI (#2290)", () => {
     expect(error).toHaveBeenCalledWith("since must be a non-negative integer seq cursor.");
 
     error.mockClear();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    expect(
+      runLedgerList(["--since", "-1", "--json"], {
+        initEventLedger: () => eventLedger,
+      }),
+    ).toBe(2);
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+      ok: false,
+      error: "since must be a non-negative integer seq cursor.",
+    });
+
+    error.mockClear();
     expect(
       runLedgerList(["--since", "1.5"], {
         initEventLedger: () => eventLedger,

@@ -166,6 +166,18 @@ describe("runLoop (#5135)", () => {
     });
     expect(exitCode).toBe(3);
     expect(error).toHaveBeenCalledWith(expect.stringContaining("governor state cannot be loaded"));
+    error.mockClear();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const jsonExit = await runLoop(["acme/widgets", "--miner-login", "alice", "--json"], {
+      openGovernorState: () => {
+        throw new Error("corrupt_governor_state_db");
+      },
+    });
+    expect(jsonExit).toBe(3);
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+      ok: false,
+      error: expect.stringContaining("governor state cannot be loaded"),
+    });
   });
 
   it("halts immediately on an active kill switch, before running discovery or any attempt", async () => {
@@ -499,5 +511,26 @@ describe("runLoop (#5135)", () => {
 
     expect(exitCode).toBe(2);
     for (const spy of closeSpies) expect(spy).toHaveBeenCalledTimes(1);
+
+    const jsonStores = tempStores();
+    const jsonCloseSpies = [jsonStores.eventLedger, jsonStores.governorLedger, jsonStores.portfolioQueue, jsonStores.runState, jsonStores.governorState].map((store) => vi.spyOn(store, "close"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const jsonExit = await runLoop(["acme/widgets", "--miner-login", "alice", "--json"], {
+      openGovernorState: () => jsonStores.governorState,
+      initEventLedger: () => jsonStores.eventLedger,
+      initGovernorLedger: () => jsonStores.governorLedger,
+      initPortfolioQueue: () => jsonStores.portfolioQueue,
+      initRunStateStore: () => jsonStores.runState,
+      runDiscover: async () => {
+        throw new Error("network_unreachable");
+      },
+      ...readyLoopOptions(),
+    });
+    expect(jsonExit).toBe(2);
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual({
+      ok: false,
+      error: "network_unreachable",
+    });
+    for (const spy of jsonCloseSpies) expect(spy).toHaveBeenCalledTimes(1);
   });
 });
