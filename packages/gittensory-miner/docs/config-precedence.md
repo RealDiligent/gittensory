@@ -80,6 +80,18 @@ There is **no `.gittensory-miner.yml` forge block** today; `--api-base-url` foll
 
 Explicit per-store env **wins** over config dir; config dir **wins** over XDG. No CLI or goal-spec override.
 
+### Fleet credential files (`<NAME>_FILE`)
+
+**Sources:** plain `<NAME>` env var and companion `<NAME>_FILE` path (`lib/load-file-credentials.js`, invoked from `bin/gittensory-miner.js` before any subcommand).
+
+**Order (mirrors ORB self-host `load-file-secrets.ts`):**
+
+1. Truthy plain `<NAME>` env var wins (including when both plain and `_FILE` are set).
+2. Else when only `<NAME>_FILE` is set, trimmed file contents become `<NAME>`.
+3. Unreadable `_FILE` path → process exits with an error naming the path (no silent empty fallback).
+
+**Scope today:** `GITHUB_TOKEN` always; plus `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` for the configured `MINER_CODING_AGENT_PROVIDER`. Codex-cli uses `auth.json` at `resolveCodexAuthPath` instead of a secret env var.
+
 ## Known gaps / inconsistencies
 
 - **No unified precedence** across yml + env + CLI for a single knob — each concern owns its resolver.

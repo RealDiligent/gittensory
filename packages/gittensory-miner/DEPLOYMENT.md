@@ -68,6 +68,23 @@ docker run --rm -it \
   doctor
 ```
 
+For Docker Swarm / Kubernetes, prefer mounting secrets as files instead of plain `-e` values (which appear in `docker inspect`). The CLI resolves `<NAME>_FILE` into `<NAME>` at startup for `GITHUB_TOKEN` and the active coding-agent provider's credential env vars (`lib/load-file-credentials.js`):
+
+```sh
+docker run --rm -it \
+  -e GITTENSORY_MINER_CONFIG_DIR=/data/miner \
+  -e GITHUB_TOKEN_FILE=/run/secrets/github_token \
+  -e MINER_CODING_AGENT_PROVIDER=claude-cli \
+  -e CLAUDE_CODE_OAUTH_TOKEN_FILE=/run/secrets/claude_oauth \
+  -v miner-data:/data/miner \
+  -v /run/secrets/github_token:/run/secrets/github_token:ro \
+  -v /run/secrets/claude_oauth:/run/secrets/claude_oauth:ro \
+  gittensory-miner:latest \
+  doctor
+```
+
+**Precedence:** when both `<NAME>` and `<NAME>_FILE` are set, the plain env var wins (including an explicit empty value). When only `<NAME>_FILE` is set, the file contents (trimmed) become the effective credential. An unreadable `_FILE` path fails immediately with an error naming the path — the miner never silently falls through to an empty credential.
+
 The image entrypoint is `gittensory-miner`; pass subcommands after the image name (`status`, `doctor`, `claim`, …).
 
 - **`/data/miner` volume** — holds all SQLite state (`claim-ledger.sqlite3`, `plan-store.sqlite3`, etc.) so containers are disposable. Defaults to `GITTENSORY_MINER_CONFIG_DIR=/data/miner` in the image.

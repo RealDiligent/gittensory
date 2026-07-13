@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { loadFileCredentials } from "../lib/load-file-credentials.js";
 import { runAttempt } from "../lib/attempt-cli.js";
 import { printHelp, printVersion, runCli } from "../lib/cli.js";
 import { runDenyCheck } from "../lib/deny-check.js";
@@ -25,6 +26,9 @@ import {
   startUpdateCheck,
 } from "../lib/update-check.js";
 import { resolveMinerVersion } from "../lib/version.js";
+
+// Fleet-mode secret mounts: resolve `<NAME>_FILE` into `<NAME>` before any subcommand reads credentials (#5178).
+loadFileCredentials(process.env);
 
 // Register signal + crash handlers once, before any command runs, so an interrupted run closes its open ledgers
 // cleanly instead of dying mid-write (#4826). Covers every subcommand below, including the local ones.
