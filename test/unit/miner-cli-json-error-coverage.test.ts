@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  runClaimClaim,
+  runClaimCli,
   runClaimList,
   runClaimRelease,
 } from "../../packages/gittensory-miner/lib/claim-ledger-cli.js";
@@ -13,6 +15,8 @@ import {
   runQueueDone,
   runQueueList,
   runQueueNext,
+  runQueueRelease,
+  runQueueRequeue,
 } from "../../packages/gittensory-miner/lib/portfolio-queue-cli.js";
 
 const { getRunState, setRunState } = vi.hoisted(() => ({
@@ -108,6 +112,8 @@ describe("miner CLI --json error coverage (#4836)", () => {
         }),
       "batch_db",
     );
+    expectJsonError(() => runQueueRelease(["only-one", "--json"]), /queue release/);
+    expectJsonError(() => runQueueRequeue(["only-one", "--json"]), /queue requeue/);
   });
 
   it("plan list/show failures", () => {
@@ -122,6 +128,15 @@ describe("miner CLI --json error coverage (#4836)", () => {
       "plan_list_db",
     );
     expectJsonError(() => runPlanShow(["--json"]), /Usage: gittensory-miner plan show/);
+    expectJsonError(
+      () =>
+        runPlanShow(["plan-a", "--json"], {
+          openPlanStore: () => {
+            throw new Error("plan_show_db");
+          },
+        }),
+      "plan_show_db",
+    );
   });
 
   it("state get/set/cli failures", () => {
@@ -137,6 +152,11 @@ describe("miner CLI --json error coverage (#4836)", () => {
     const broken = () => {
       throw new Error("ledger_broken");
     };
+    expectJsonError(() => runClaimClaim(["--json"]), /Usage: gittensory-miner claim claim/);
+    expectJsonError(
+      () => runClaimClaim(["acme/widgets", "1", "--json"], { openClaimLedger: broken }),
+      "ledger_broken",
+    );
     expectJsonError(
       () => runClaimRelease(["acme/widgets", "1", "--json"], { openClaimLedger: broken }),
       "ledger_broken",
@@ -145,6 +165,7 @@ describe("miner CLI --json error coverage (#4836)", () => {
       () => runClaimList(["--json"], { openClaimLedger: broken }),
       "ledger_broken",
     );
+    expectJsonError(() => runClaimCli("peek", ["--json"]), /Unknown claim subcommand/);
   });
 
   it("event ledger list runtime failure", () => {
@@ -160,6 +181,15 @@ describe("miner CLI --json error coverage (#4836)", () => {
 
   it("governor list parse failure", async () => {
     await expectJsonErrorAsync(() => runGovernorList(["--verbose", "--json"]), /Unknown option/);
+    await expectJsonErrorAsync(
+      () =>
+        runGovernorList(["--json"], {
+          initGovernorLedger: () => {
+            throw new Error("gov_db");
+          },
+        }),
+      "gov_db",
+    );
   });
 
   it("loop parse failure", async () => {
