@@ -24,7 +24,7 @@ export const REJECTION_REASON_OWN_SUBMISSION_REJECTED: "own_submission_rejected"
 export function resolveRejectionSignaled(
   repoFullName: string,
   options?: RejectionSignaledOptions,
-): Promise<false | RejectionSignaledReason>;
+): Promise<false | RejectionSignaledReason | true>;
 
 export function resolveOwnRejectionHistory(
   repoFullName: string,

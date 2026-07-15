@@ -21,6 +21,7 @@ import type { PrepareAttemptWorktreeResult } from "../../packages/loopover-miner
 import {
   REJECTION_REASON_AI_USAGE_POLICY_BAN,
   REJECTION_REASON_OWN_SUBMISSION_REJECTED,
+  type RejectionSignaledReason,
 } from "../../packages/loopover-miner/lib/rejection-signal.js";
 import { DEFAULT_AMS_POLICY_SPEC, DEFAULT_MINER_GOAL_SPEC, parseFocusManifest } from "../../packages/loopover-engine/src/index";
 
@@ -77,7 +78,7 @@ function fakeLoopResult(overrides: Record<string, unknown> = {}) {
  *  through) the final runMinerAttempt call, without doing any real network/git/subprocess work. */
 function readyPipelineOptions(overrides: Record<string, unknown> = {}) {
   return {
-    resolveRejectionSignaled: async () => false,
+    resolveRejectionSignaled: async (): Promise<false | RejectionSignaledReason> => false,
     prepareAttemptWorktree: async () => fakeWorktreeResult(),
     cleanupAttemptWorktree: vi.fn().mockResolvedValue({ ok: true, removed: true }),
     fetchSelfReviewContext: async () => fakeReviewContext(),
@@ -1045,7 +1046,7 @@ describe("runAttempt (#5132)", () => {
       initEventLedger: () => eventLedger,
       initAttemptLog: () => attemptLog,
       initGovernorLedger: () => governorLedger,
-      resolveRejectionSignaled: async () => false,
+      resolveRejectionSignaled: async (): Promise<false | RejectionSignaledReason> => false,
     });
 
     expect(exitCode).toBe(3);
@@ -1078,7 +1079,7 @@ describe("runAttempt (#5132)", () => {
       initEventLedger: () => eventLedger,
       initAttemptLog: () => attemptLog,
       initGovernorLedger: () => governorLedger,
-      resolveRejectionSignaled: async () => false,
+      resolveRejectionSignaled: async (): Promise<false | RejectionSignaledReason> => false,
     });
 
     expect(exitCode).toBe(2);
@@ -1214,7 +1215,7 @@ describe("runAttempt (#5132)", () => {
       initEventLedger: () => eventLedger,
       initAttemptLog: () => attemptLog,
       initGovernorLedger: () => governorLedger,
-      resolveRejectionSignaled: async () => false,
+      resolveRejectionSignaled: async (): Promise<false | RejectionSignaledReason> => false,
       prepareAttemptWorktree: async () => ({ ok: false, error: "git_clone_failed" }),
       cleanupAttemptWorktree: cleanupAttemptWorktreeSpy,
     });
@@ -1250,7 +1251,7 @@ describe("runAttempt (#5132)", () => {
       initEventLedger: () => eventLedger,
       initAttemptLog: () => attemptLog,
       initGovernorLedger: () => governorLedger,
-      resolveRejectionSignaled: async () => false,
+      resolveRejectionSignaled: async (): Promise<false | RejectionSignaledReason> => false,
       prepareAttemptWorktree: async () => ({ ok: false, error: "git_fetch_failed" }),
       cleanupAttemptWorktree: vi.fn(),
     });
