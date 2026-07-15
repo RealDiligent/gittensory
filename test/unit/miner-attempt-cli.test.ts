@@ -1161,6 +1161,25 @@ describe("runAttempt (#5132)", () => {
     });
   });
 
+  it("REGRESSION (#6055): maps legacy boolean true from resolveRejectionSignaled to ai_usage_policy_ban", async () => {
+    const { allocator, claimLedger, eventLedger, attemptLog, governorLedger } = tempLedgers();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const exitCode = await runAttempt(["acme/widgets", "7", "--miner-login", "alice", "--json"], {
+      env: { MINER_CODING_AGENT_PROVIDER: "noop" },
+      openWorktreeAllocator: () => allocator,
+      openClaimLedger: () => claimLedger,
+      initEventLedger: () => eventLedger,
+      initAttemptLog: () => attemptLog,
+      initGovernorLedger: () => governorLedger,
+      resolveRejectionSignaled: async (): Promise<true> => true,
+    });
+
+    expect(exitCode).toBe(5);
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.reason).toBe(REJECTION_REASON_AI_USAGE_POLICY_BAN);
+  });
+
   it("REGRESSION (#6055): reports a human-readable message for own-rejection-history aborts", async () => {
     const { allocator, claimLedger, eventLedger, attemptLog, governorLedger } = tempLedgers();
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
