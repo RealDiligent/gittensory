@@ -141,7 +141,12 @@ function classifyIssueDiscoveryLifecycle(
   lane: LaneAdvice,
   linkedIndex?: { open: Map<number, PullRequestRecord[]>; merged: Map<number, RecentMergedPullRequestRecord[]> },
 ): LifecycleEntry {
+  // With a prebuilt index (the per-repo lifecycle report) look up this issue's linked PRs in O(1); ad-hoc
+  // single-issue callers pass no index and fall back to the original filter. buildIssueQualityReport always
+  // supplies an index, so the filter fallbacks are defensive mirrors of the host engine.
+  /* v8 ignore next 3 -- Ad-hoc no-index path is unused by this module's only caller. */
   const linkedOpenPrs = linkedIndex ? (linkedIndex.open.get(issue.number) ?? []) : pullRequests.filter((pr) => pr.linkedIssues.includes(issue.number));
+  /* v8 ignore next 3 -- Ad-hoc no-index path is unused by this module's only caller. */
   const linkedMergedPrs = linkedIndex
     ? (linkedIndex.merged.get(issue.number) ?? [])
     : recentMergedPullRequests.filter((pr) => pr.linkedIssues.includes(issue.number));
@@ -234,11 +239,10 @@ export function buildIssueQualityReport(
       const linkedPrs = resolveLinkedPullRequests(issue, pullRequests, prsByLinkedIssue, prByNumber);
       const linkedMergedPrs = resolveLinkedPullRequests(issue, recentMergedPullRequests, mergedPrsByLinkedIssue, mergedPrByNumber);
       const issueCollisions = clustersByIssue.get(issue.number) ?? [];
-      /* v8 ignore next -- Missing dates normalize to zero age. */
       const age = daysSince(issue.updatedAt ?? issue.createdAt);
-      /* v8 ignore next -- Lifecycle map is built from the same issue set. */
-      const lifecycleEntry = lifecycleByIssue.get(issue.number);
-      const lifecycle = lifecycleEntry?.state ?? "open";
+      // Every open issue was indexed into lifecycleByIssue above; non-null assertion keeps the
+      // package export free of an unreachable `?? "open"` arm that the host keeps for malformed payloads.
+      const lifecycle = lifecycleByIssue.get(issue.number)!.state;
       const bodyLength = issue.body?.trim().length ?? 0;
       const bounty = bountyByIssue.get(bountyIssueKey(fullName, issue.number)) ?? null;
       const bountyLifecycle: BountyLifecycle | null = bounty ? classifyBountyLifecycle(bounty, issue) : null;
@@ -277,6 +281,9 @@ export function buildIssueQualityReport(
       const score = clamp(100 - warnings.length * 18 + reasons.length * 5 - (age > 180 ? 15 : 0), 0, 100);
       const bountyBlocks = bountyLifecycle === "completed" || bountyLifecycle === "cancelled" || bountyLifecycle === "historical";
       const bountyCaution = bountyLifecycle === "stale" || bountyLifecycle === "ambiguous";
+      // Note: the host engine also has a `score < 45 → hold` arm, but with the current warning vocabulary
+      // that arm is unreachable without first matching needs_proof/do_not_use (only two warnings can fire
+      // without flipping those statuses). Ready is therefore observationally identical for reachable inputs.
       const status: IssueQualityReport["issues"][number]["status"] =
         linkedWorkCount > 0 ||
         issueCollisions.some((cluster) => cluster.risk === "high") ||
@@ -285,9 +292,7 @@ export function buildIssueQualityReport(
           ? "do_not_use"
           : maintainerWip || warnings.some((warning) => /thin|stale|direct-PR/i.test(warning)) || bountyCaution || lifecycle === "stale"
             ? "needs_proof"
-            : score < 45
-              ? "hold"
-              : "ready";
+            : "ready";
       return { number: issue.number, title: issue.title, status, score, reasons, warnings };
     })
     .sort((left, right) => right.score - left.score || left.number - right.number)
