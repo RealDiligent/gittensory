@@ -23,18 +23,18 @@ export function queueItemId(apiBaseUrl, repoFullName, identifier) {
 /** Reverse {@link queueItemId} after engine selection so claims can target SQLite primary keys. */
 export function parseQueueItemId(id) {
   if (typeof id !== "string") throw new Error("invalid_queue_item_id");
-  const firstSeparatorIndex = id.indexOf(ITEM_ID_SEPARATOR);
-  if (firstSeparatorIndex <= 0) throw new Error("invalid_queue_item_id");
-  const rest = id.slice(firstSeparatorIndex + ITEM_ID_SEPARATOR.length);
-  const secondSeparatorIndex = rest.indexOf(ITEM_ID_SEPARATOR);
-  if (secondSeparatorIndex <= 0 || secondSeparatorIndex === rest.length - ITEM_ID_SEPARATOR.length) {
-    throw new Error("invalid_queue_item_id");
-  }
-  return {
-    apiBaseUrl: id.slice(0, firstSeparatorIndex),
-    repoFullName: rest.slice(0, secondSeparatorIndex),
-    identifier: rest.slice(secondSeparatorIndex + ITEM_ID_SEPARATOR.length),
-  };
+  const lastSeparatorIndex = id.lastIndexOf(ITEM_ID_SEPARATOR);
+  if (lastSeparatorIndex <= 0) throw new Error("invalid_queue_item_id");
+  const identifier = id.slice(lastSeparatorIndex + ITEM_ID_SEPARATOR.length);
+  if (!identifier) throw new Error("invalid_queue_item_id");
+  const beforeIdentifier = id.slice(0, lastSeparatorIndex);
+  const secondLastSeparatorIndex = beforeIdentifier.lastIndexOf(ITEM_ID_SEPARATOR);
+  if (secondLastSeparatorIndex <= 0) throw new Error("invalid_queue_item_id");
+  const repoFullName = beforeIdentifier.slice(secondLastSeparatorIndex + ITEM_ID_SEPARATOR.length);
+  if (!repoFullName) throw new Error("invalid_queue_item_id");
+  const apiBaseUrl = beforeIdentifier.slice(0, secondLastSeparatorIndex);
+  if (!apiBaseUrl) throw new Error("invalid_queue_item_id");
+  return { apiBaseUrl, repoFullName, identifier };
 }
 
 /** Coerce caps to finite non-negative integers (mirrors the engine's normalizeCaps posture). */

@@ -66,12 +66,23 @@ describe("entriesToPortfolioQueue() / selectEligibleBatch() (#4285)", () => {
     });
   });
 
+  it("queueItemId/parseQueueItemId round-trip an IPv6-literal apiBaseUrl (#5924)", () => {
+    const apiBaseUrl = "https://[::1]:3000/api/v3";
+    const id = queueItemId(apiBaseUrl, "acme/widgets", "issue-7");
+    expect(parseQueueItemId(id)).toEqual({
+      apiBaseUrl,
+      repoFullName: "acme/widgets",
+      identifier: "issue-7",
+    });
+  });
+
   it("parseQueueItemId rejects a malformed id", () => {
     expect(() => parseQueueItemId(42 as never)).toThrow("invalid_queue_item_id");
     expect(() => parseQueueItemId("no-separators-at-all")).toThrow("invalid_queue_item_id");
     expect(() => parseQueueItemId("https://api.github.com::acme/widgets")).toThrow("invalid_queue_item_id");
     expect(() => parseQueueItemId("::acme/widgets::issue:7")).toThrow("invalid_queue_item_id");
     expect(() => parseQueueItemId("https://api.github.com::acme/widgets::")).toThrow("invalid_queue_item_id");
+    expect(() => parseQueueItemId("https://api.github.com::::issue:7")).toThrow("invalid_queue_item_id");
   });
 
   it("entriesToPortfolioQueue falls back to the github.com default when a row's apiBaseUrl is missing (#5563)", () => {
