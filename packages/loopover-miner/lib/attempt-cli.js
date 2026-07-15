@@ -447,8 +447,54 @@ export async function runAttempt(args, options = {}) {
     const reputationHistory = readReputationHistory(parsed.repoFullName);
     const governor = buildAttemptGovernorContext(env, amsPolicy.spec, repoPaused, convergenceInput, reputationHistory);
 
+    // Real maxConcurrentClaims enforcement (#6056): the repo's .loopover-miner.yml cap is parsed and
+    // validated by resolveMinerGoalSpec above, but must be honored here before recording a new soft-claim.
+    const activeClaims = claimLedger.listActiveClaims(parsed.repoFullName);
+    if (activeClaims.length >= minerGoalSpec.spec.maxConcurrentClaims) {
+      const reason = "max_concurrent_claims_exceeded";
+      attemptLog.appendAttemptLogEvent({
+        eventType: "attempt_aborted",
+        attemptId,
+        actionClass: "open_pr",
+        mode,
+        reason,
+        payload: {
+          repoFullName: parsed.repoFullName,
+          issueNumber: parsed.issueNumber,
+          maxConcurrentClaims: minerGoalSpec.spec.maxConcurrentClaims,
+          activeClaimCount: activeClaims.length,
+        },
+      });
+      eventLedger.appendEvent({
+        type: "attempt_blocked",
+        repoFullName: parsed.repoFullName,
+        payload: { issueNumber: parsed.issueNumber, reason },
+      });
+      const blockedResult = {
+        outcome: "blocked_max_concurrent_claims",
+        reason,
+        maxConcurrentClaims: minerGoalSpec.spec.maxConcurrentClaims,
+        activeClaimCount: activeClaims.length,
+        repoFullName: parsed.repoFullName,
+        issueNumber: parsed.issueNumber,
+        minerLogin: parsed.minerLogin,
+        base: parsed.base,
+        mode,
+        attemptId,
+      };
+      if (parsed.json) {
+        console.log(JSON.stringify(blockedResult, null, 2));
+      } else {
+        console.error(
+          `Attempt for ${parsed.repoFullName}#${parsed.issueNumber} is blocked: this repo's maxConcurrentClaims cap (${minerGoalSpec.spec.maxConcurrentClaims}) is already met (${activeClaims.length} active claim(s)).`,
+        );
+      }
+      options.onResult?.(blockedResult);
+      return 11;
+    }
+
     // Real soft-claim (#5393): recorded once we've committed to a real attempt (past feasibility), so a
-    // sibling miner process on this machine sees it via claimLedger.listClaims/listActiveClaims while this
+    // sibling miner process on this machine sees it via claimLedger.listActiveClaims while this
     // attempt is in flight. Released in `finally` on every terminal outcome -- mirrors the worktree
     // allocation slot's own acquire-then-always-release pattern below. The real claimedAt this returns is
     // ALSO this miner's own claim-time for the post-submission conflict check further down (#4848).
