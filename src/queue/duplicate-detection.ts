@@ -12,6 +12,10 @@ import { githubRateLimitAdmissionKeyForToken } from "../github/client";
 import { isDuplicateClusterWinnerByClaim, resolveDuplicateClusterWinnerNumber } from "../signals/duplicate-winner";
 import { isDuplicateWinnerEnabledGlobally, resolveDuplicateWinnerEnabled } from "../settings/duplicate-winner-mode";
 import type { PullRequestRecord, RepositorySettings } from "../types";
+import { mapWithConcurrency } from "./map-with-concurrency";
+
+/** Same order of magnitude as processors.ts's other per-item live GitHub fan-outs (#5835). */
+const DUPLICATE_SIBLING_LIVE_RECONCILE_CONCURRENCY = 10;
 
 /**
  * Duplicate-winner adjudication (#dup-winner) seam for the close-reason disposition. Given a PR's open
@@ -93,8 +97,7 @@ export async function reconcileLiveDuplicateSiblings(
   const token = installationToken ?? env.GITHUB_PUBLIC_TOKEN;
   const admissionKey = githubRateLimitAdmissionKeyForToken(env, token, installationId);
   const staleClosed = new Set<number>();
-  await Promise.all(
-    overlapping.map(async (sibling) => {
+  await mapWithConcurrency(overlapping, DUPLICATE_SIBLING_LIVE_RECONCILE_CONCURRENCY, async (sibling) => {
       // #2537: deliberately NOT durable-cached (flagged by the gate's own review) -- despite recomputing every
       // delivery, this reconcile feeds duplicate-winner selection, which can auto-CLOSE the CURRENT PR when
       // duplicateWinnerEnabled. A cached "open" read up to PR_STATE_CACHE_MAX_AGE_MS stale after a missed
@@ -111,8 +114,7 @@ export async function reconcileLiveDuplicateSiblings(
       ).catch(() => undefined);
       if (liveState !== undefined && liveState !== "open")
         staleClosed.add(sibling.number);
-    }),
-  );
+    });
   if (staleClosed.size === 0) return otherOpenPullRequests;
   return otherOpenPullRequests.filter(
     (other) => !staleClosed.has(other.number),

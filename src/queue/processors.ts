@@ -366,6 +366,8 @@ export {
   linkedIssueDuplicatePullRequestsForGate,
   reconcileLiveDuplicateSiblings,
 } from "./duplicate-detection";
+import { mapWithConcurrency } from "./map-with-concurrency";
+export { mapWithConcurrency } from "./map-with-concurrency";
 // #4013 step 4: same shim shape for the AI-slop-advisory gating/orchestration functions -- imported here
 // for this file's own internal callers, and re-exported so test/unit/advisory-ai-routing-call-sites.test.ts,
 // test/unit/ai-slop.test.ts, and test/unit/gate-check-policy.test.ts's existing
@@ -4913,22 +4915,6 @@ async function countLiveOpenWithConcurrencyUntil(
 // this same check for over-cap siblings. Every sampled entry must still be verified, so this bounds concurrency
 // via mapWithConcurrency in addition to the repository query's total row cap.
 const CONTRIBUTOR_CAP_LIVE_CHECK_CONCURRENCY = 10;
-
-export async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.max(1, Math.min(concurrency, items.length || 1));
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await mapper(items[index] as T);
-      }
-    }),
-  );
-  return results;
-}
 
 /**
  * Install-wide contributor open-item count, LIVE-VERIFIED (#2562 gate-review follow-up): every OTHER counted

@@ -179,4 +179,26 @@ describe("reconcileLiveDuplicateSiblings (#dup-winner / audit #15)", () => {
     const pr = makePr(9, "open", [1]);
     expect(await reconcileLiveDuplicateSiblings(env, null, "owner/repo", pr, siblings, { duplicateWinnerMode: "off" })).toBe(siblings);
   });
+
+  it("bounds live sibling fetches to 10 concurrent in-flight calls (#5835)", async () => {
+    const env = createTestEnv();
+    env.LOOPOVER_DUPLICATE_WINNER = "true";
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (!url.includes("/pulls/")) return new Response("not found", { status: 404 });
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      inFlight -= 1;
+      return new Response(JSON.stringify({ state: "open" }), { status: 200 });
+    });
+    const siblings = Array.from({ length: 15 }, (_, index) => makePr(index + 1, "open", [1]));
+    const pr = makePr(99, "open", [1]);
+    const result = await reconcileLiveDuplicateSiblings(env, null, "owner/repo", pr, siblings, settings);
+    expect(result.map((p) => p.number)).toEqual(siblings.map((p) => p.number));
+    expect(maxInFlight).toBeLessThanOrEqual(10);
+    expect(maxInFlight).toBeGreaterThan(1);
+  });
 });
