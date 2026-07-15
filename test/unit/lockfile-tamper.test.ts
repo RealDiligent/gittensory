@@ -421,4 +421,24 @@ describe("lockfileTamperRiskFinding", () => {
     expect(finding).not.toBeNull();
     expect(finding?.detail).toContain("foo");
   });
+
+  it("tracks tamper signals inside a packages root wrapper and through optionalDependencies sub-objects", () => {
+    const lockPatch = [
+      '@@ -1,12 +1,12 @@',
+      ' "packages": {',
+      '     "node_modules/lodash": {',
+      '       "optionalDependencies": {',
+      '         "left-pad": {',
+      '           "version": "1.0.0"',
+      '         }',
+      '       },',
+      '-      "integrity": "sha512-old=="',
+      '+      "integrity": "sha512-tampered=="',
+      '     }',
+      ' },',
+    ].join("\n");
+    const finding = lockfileTamperRiskFinding([lockfilePatch(lockPatch)]);
+    expect(finding).not.toBeNull();
+    expect(finding?.detail).toContain("lodash");
+  });
 });
