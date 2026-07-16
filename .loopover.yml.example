@@ -730,6 +730,26 @@ review:
 # Everything a maintainer can toggle in the dashboard can be set here as code.
 # All values shown are the safe defaults; delete any line to inherit it.
 settings:
+  # The 11 fields below each have a friendlier `gate.<name>` alias documented in section 2 above
+  # (`gate.checkMode`/`gate.enabled`, `gate.linkedIssue`, `gate.duplicates`, `gate.readiness.mode`/
+  # `gate.readiness.minScore`, `gate.selfAuthoredLinkedIssue`, `gate.aiReview.mode`/`.byok`/`.provider`/
+  # `.model`/`.allAuthors`). `gate.*` is the RECOMMENDED spelling going forward and wins whenever both
+  # forms are set for the same field (see PRECEDENCE at the top of this file). The generic names below
+  # remain fully supported (no functional deprecation, still DB-backed) and are shown here, commented
+  # out, only so this reference stays discoverable for a config written before the `gate:` alias
+  # existed. Prefer `gate.*` above for anything new.
+  # reviewCheckMode: visible                   # alias of gate.checkMode / gate.enabled
+  # linkedIssueGateMode: advisory               # alias of gate.linkedIssue
+  # duplicatePrGateMode: block                  # alias of gate.duplicates
+  # qualityGateMode: advisory                   # alias of gate.readiness.mode
+  # qualityGateMinScore: null                   # alias of gate.readiness.minScore
+  # selfAuthoredLinkedIssueGateMode: advisory   # alias of gate.selfAuthoredLinkedIssue
+  # aiReviewMode: off                           # alias of gate.aiReview.mode
+  # aiReviewByok: false                         # alias of gate.aiReview.byok
+  # aiReviewProvider: null                      # alias of gate.aiReview.provider
+  # aiReviewModel: null                         # alias of gate.aiReview.model
+  # aiReviewAllAuthors: false                   # alias of gate.aiReview.allAuthors
+
   # Who receives the public PR comment.
   # off | detected_contributors_only | all_prs. Default: detected_contributors_only.
   commentMode: detected_contributors_only
