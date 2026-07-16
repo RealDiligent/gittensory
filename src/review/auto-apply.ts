@@ -244,18 +244,19 @@ export type LiveGateThresholdFields = {
 
 /** Prefer the live override; if absent, fall through to a soaking shadow's queued override (#6486 / #6209). */
 export function authoritativeGateOverride(live: TunableOverride | null, shadow: ShadowOverride | null): TunableOverride | null {
-  return live ?? shadow?.override ?? null;
+  if (live) return live;
+  if (shadow) return shadow.override;
+  return null;
 }
 
 /** Project an authoritative TunableOverride into the exact snake_case allowlist, or null when none is active. */
 export function toLiveGateThresholdFields(override: TunableOverride | null): LiveGateThresholdFields | null {
   if (!override) return null;
-  if (override.confidenceFloor == null && !override.scopeCap) return null;
-  return {
-    confidence_floor: override.confidenceFloor ?? null,
-    scope_cap_files: override.scopeCap?.files ?? null,
-    scope_cap_lines: override.scopeCap?.lines ?? null,
-  };
+  const confidence_floor = override.confidenceFloor === undefined ? null : override.confidenceFloor;
+  const scope_cap_files = override.scopeCap === undefined ? null : override.scopeCap.files;
+  const scope_cap_lines = override.scopeCap === undefined ? null : override.scopeCap.lines;
+  if (confidence_floor === null && scope_cap_files === null && scope_cap_lines === null) return null;
+  return { confidence_floor, scope_cap_files, scope_cap_lines };
 }
 
 /** Internal: raw row fetch shared by loadShadowOverride + writeShadowOverride, so a write can preserve the
