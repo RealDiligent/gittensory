@@ -205,6 +205,12 @@ gate evaluation, comments, labels, audit, or autonomous merge/close on or off �
 dimension modes below directly, and set `gate.checkMode` explicitly instead of
 the ambiguous `gate.enabled`. The main dimensions:
 
+Several of these also have a generic `settings.<field>` spelling (for example
+`settings.linkedIssueGateMode`, `settings.qualityGateMode`,
+`settings.aiReviewMode`) — that spelling remains fully supported for backward
+compatibility, but the `gate.*` form shown below is the recommended one going
+forward and wins whenever both are set for the same field.
+
 - `gate.pack` — the policy pack: `gittensor` (default; registry-aware,
   tracks confirmed-Gittensor-contributor status for scoring) or `oss-anti-slop`
   (runs the deterministic rules against any author on any repo, with no
