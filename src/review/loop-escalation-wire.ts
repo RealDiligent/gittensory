@@ -34,10 +34,11 @@ export function isLoopEscalationSweepEnabled(env: { LOOPOVER_LOOP_ESCALATION?: s
 function envString(env: Env, name: string): string | undefined {
   const fromEnv = (env as unknown as Record<string, unknown>)[name];
   if (typeof fromEnv === "string" && fromEnv.trim().length > 0) return fromEnv.trim();
-  /* v8 ignore next 2 -- process.env is the self-host Node fallback; Worker/D1 tests pass values on Env. */
+  /* v8 ignore start -- process.env is the self-host Node fallback; Worker/D1 tests pass values on Env. */
   const processEnv = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   const fromProcess = processEnv?.[name];
   return typeof fromProcess === "string" && fromProcess.trim().length > 0 ? fromProcess.trim() : undefined;
+  /* v8 ignore stop */
 }
 
 function isValidDiscordWebhook(url: string): boolean {
@@ -97,8 +98,7 @@ export function loadActiveLoopsFromEnv(env: Env): ActiveLoopFacts[] {
 }
 
 function formatAttentionLine(row: FleetLoopRow): string {
-  const reasons = row.escalation.reasons.join("; ");
-  return `• \`${row.loopId}\` (tenant \`${row.tenantId}\`) · ${row.runStatus}/${row.healthStatus} · ${row.escalation.severity}: ${reasons || row.escalation.action}`;
+  return `• \`${row.loopId}\` (tenant \`${row.tenantId}\`) · ${row.runStatus}/${row.healthStatus} · ${row.escalation.severity}: ${row.escalation.reasons.join("; ")}`;
 }
 
 export type LoopEscalationSweepDeps = {
