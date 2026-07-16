@@ -1,6 +1,10 @@
 // Resolve `<NAME>_FILE` env vars (Docker secrets / multi-line keys) into `<NAME>` at self-host startup.
 // Extracted from server.ts (#4403) so this has a real test harness -- server.ts itself boots the whole
 // app on import and is Codecov-ignored, so it has no runtime test coverage of its own.
+//
+// A missing or unreadable `<NAME>_FILE` fails the container fast (throws), matching the miner package's
+// `loadMinerFileSecrets` behavior documented in packages/loopover-miner/DEPLOYMENT.md — rather than
+// silently leaving the target env var unset and proceeding without the credential (#6284).
 import { readFileSync } from "node:fs";
 
 // Docker Compose's OWN reserved `_FILE`-suffixed environment variables -- never loopover's secret-file
@@ -22,15 +26,21 @@ export function loadFileSecrets(
     if (!key.endsWith("_FILE") || !env[key] || COMPOSE_RESERVED_FILE_VARS.has(key)) continue;
     const target = key.slice(0, -"_FILE".length);
     if (env[target]) continue; // an explicit value wins
+    const path = env[key] as string;
     try {
-      env[target] = readFile(env[key] as string).trim();
-    } catch {
+      env[target] = readFile(path).trim();
+    } catch (error) {
       console.error(
         JSON.stringify({
           level: "error",
           event: "selfhost_secret_file_unreadable",
           var: key,
         }),
+      );
+      throw new Error(
+        `Failed to read secret file for ${key} (${path}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   }

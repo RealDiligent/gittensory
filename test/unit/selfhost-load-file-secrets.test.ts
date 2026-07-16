@@ -49,13 +49,15 @@ describe("loadFileSecrets (#4403)", () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it("logs a structured error and leaves the target unset when the file read fails, for a genuine secret var", () => {
+  it("REGRESSION (#6284): throws (and logs) when a configured _FILE secret is missing/unreadable, instead of leaving the target unset", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const readFile = vi.fn(() => {
       throw new Error("ENOENT");
     });
     const env: Record<string, string | undefined> = { SENTRY_DSN_FILE: "/run/secrets/missing" };
-    loadFileSecrets(env, readFile);
+    expect(() => loadFileSecrets(env, readFile)).toThrow(
+      "Failed to read secret file for SENTRY_DSN_FILE (/run/secrets/missing): ENOENT",
+    );
     expect(env.SENTRY_DSN).toBeUndefined();
     expect(errorSpy).toHaveBeenCalledWith(
       JSON.stringify({ level: "error", event: "selfhost_secret_file_unreadable", var: "SENTRY_DSN_FILE" }),
@@ -63,16 +65,42 @@ describe("loadFileSecrets (#4403)", () => {
     errorSpy.mockRestore();
   });
 
+  it("formats a non-Error thrown value into the fail-fast error message", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const readFile = vi.fn(() => {
+      throw "boom";
+    });
+    const env: Record<string, string | undefined> = { TOKEN_ENCRYPTION_SECRET_FILE: "/run/secrets/missing" };
+    expect(() => loadFileSecrets(env, readFile)).toThrow(
+      "Failed to read secret file for TOKEN_ENCRYPTION_SECRET_FILE (/run/secrets/missing): boom",
+    );
+    expect(env.TOKEN_ENCRYPTION_SECRET).toBeUndefined();
+    errorSpy.mockRestore();
+  });
+
+  it("still starts normally when no _FILE secret is configured at all", () => {
+    const readFile = vi.fn(() => {
+      throw new Error("should never be called");
+    });
+    const env: Record<string, string | undefined> = { SENTRY_DSN: "already-set-inline" };
+    expect(() => loadFileSecrets(env, readFile)).not.toThrow();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(env.SENTRY_DSN).toBe("already-set-inline");
+  });
+
   it("defaults to process.env and the real node:fs reader when called with no arguments", () => {
     const original = process.env.NOT_A_REAL_SECRET_FILE;
     process.env.NOT_A_REAL_SECRET_FILE = "/definitely/does/not/exist";
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    loadFileSecrets();
-    expect(errorSpy).toHaveBeenCalledWith(
-      JSON.stringify({ level: "error", event: "selfhost_secret_file_unreadable", var: "NOT_A_REAL_SECRET_FILE" }),
-    );
-    errorSpy.mockRestore();
-    if (original === undefined) delete process.env.NOT_A_REAL_SECRET_FILE;
-    else process.env.NOT_A_REAL_SECRET_FILE = original;
+    try {
+      expect(() => loadFileSecrets()).toThrow(/NOT_A_REAL_SECRET_FILE/);
+      expect(errorSpy).toHaveBeenCalledWith(
+        JSON.stringify({ level: "error", event: "selfhost_secret_file_unreadable", var: "NOT_A_REAL_SECRET_FILE" }),
+      );
+    } finally {
+      errorSpy.mockRestore();
+      if (original === undefined) delete process.env.NOT_A_REAL_SECRET_FILE;
+      else process.env.NOT_A_REAL_SECRET_FILE = original;
+    }
   });
 });
