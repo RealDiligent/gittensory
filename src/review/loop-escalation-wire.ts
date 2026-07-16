@@ -97,9 +97,8 @@ export function loadActiveLoopsFromEnv(env: Env): ActiveLoopFacts[] {
 }
 
 function formatAttentionLine(row: FleetLoopRow): string {
-  const health = row.healthStatus;
-  const reasons = row.escalation.reasons.length ? row.escalation.reasons.join("; ") : row.escalation.action;
-  return `• \`${row.loopId}\` (tenant \`${row.tenantId}\`) · ${row.runStatus}/${health} · ${row.escalation.severity}: ${reasons}`;
+  const reasons = row.escalation.reasons.join("; ");
+  return `• \`${row.loopId}\` (tenant \`${row.tenantId}\`) · ${row.runStatus}/${row.healthStatus} · ${row.escalation.severity}: ${reasons || row.escalation.action}`;
 }
 
 export type LoopEscalationSweepDeps = {
