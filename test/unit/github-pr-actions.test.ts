@@ -21,6 +21,12 @@ describe("GitHub PR action primitives (#778)", () => {
     await expect(closePullRequest(createTestEnv(), 1, " owner/repo ", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
+    // Per-segment padding (#6613) — mirrors assignees.ts parseRepoFullName coverage.
+    for (const padded of ["owner/ repo", "owner /repo"]) {
+      await expect(closePullRequest(createTestEnv(), 1, padded, 4)).rejects.toThrow(
+        /Invalid repository full name/,
+      );
+    }
     let called = false;
     vi.stubGlobal("fetch", async () => {
       called = true;
@@ -32,6 +38,11 @@ describe("GitHub PR action primitives (#778)", () => {
     await expect(closePullRequest(envWithKey(), 1, " owner/repo ", 4)).rejects.toThrow(
       /Invalid repository full name/,
     );
+    for (const padded of ["owner/ repo", "owner /repo"]) {
+      await expect(closePullRequest(envWithKey(), 1, padded, 4)).rejects.toThrow(
+        /Invalid repository full name/,
+      );
+    }
     expect(called).toBe(false);
   });
 

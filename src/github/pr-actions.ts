@@ -21,11 +21,11 @@ const COMMIT_MESSAGES_PAGE_SIZE = 100;
 // recorded, not swallowed.
 
 function splitRepo(repoFullName: string): { owner: string; repo: string } {
-  if (repoFullName !== repoFullName.trim()) {
-    throw new Error(`Invalid repository full name: ${repoFullName}`);
-  }
+  // Reject any whitespace (leading, trailing, or per-segment like `owner/ repo`) so a padded slug can never
+  // reach a GitHub call — a valid owner/repo name never contains spaces. Mirrors parseRepoFullName in
+  // assignees.ts / labels.ts (#6613).
   const parts = repoFullName.split("/");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+  if (parts.length !== 2 || !parts[0] || !parts[1] || /\s/.test(repoFullName)) {
     throw new Error(`Invalid repository full name: ${repoFullName}`);
   }
   return { owner: parts[0], repo: parts[1] };
