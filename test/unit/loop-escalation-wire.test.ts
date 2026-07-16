@@ -221,13 +221,26 @@ describe("runLoopEscalationSweep (#6349)", () => {
     ).resolves.toMatchObject({ notified: false, reason: "invalid_global_webhook" });
   });
 
-  it("accepts alternate Discord hosts on the allowlist", async () => {
+  it("honors an explicit cooldownMinutes override", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const result = await runLoopEscalationSweep(createTestEnv({ DISCORD_WEBHOOK_URL: "https://discordapp.com/api/webhooks/123/abc" }), {
-      loadActiveLoops: () => [{ loopId: "broken", tenantId: "acme", runStatus: "abandoned" }],
-      fetchImpl: (async () => new Response(null, { status: 204 })) as typeof fetch,
+    const env = createTestEnv({ DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/123/abc" });
+    const load = () => [{ loopId: "broken", tenantId: "acme", runStatus: "abandoned" as const }];
+    const fetchImpl = (async () => new Response(null, { status: 204 })) as typeof fetch;
+    const first = await runLoopEscalationSweep(env, {
+      loadActiveLoops: load,
+      fetchImpl,
+      cooldownMinutes: 10,
+      nowMs: () => 5_000_000,
     });
-    expect(result.notified).toBe(true);
+    const second = await runLoopEscalationSweep(env, {
+      loadActiveLoops: load,
+      fetchImpl,
+      cooldownMinutes: 10,
+      nowMs: () => 5_000_000 + 60_000,
+    });
+    expect(first.notified).toBe(true);
+    expect(second.notified).toBe(false);
+    expect(second.reason).toBe("cooldown");
   });
 
   it("continues when recording the Discord-error audit throws", async () => {
