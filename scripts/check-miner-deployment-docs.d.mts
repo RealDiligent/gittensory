@@ -26,4 +26,4 @@ export type MinerDeploymentAuditIo = {
   exit: (code: number) => void;
 };
 
-export function main(env?: NodeJS.ProcessEnv, io?: MinerDeploymentAuditIo): number;
+export function main(env?: Record<string, string | undefined>, io?: MinerDeploymentAuditIo): number;
