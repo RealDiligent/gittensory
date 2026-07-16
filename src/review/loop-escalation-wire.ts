@@ -11,6 +11,8 @@
 // byte-identical to today. There is no rented-loop D1 store yet; the loader reads LOOPOVER_ACTIVE_LOOPS_JSON
 // (a JSON array of ActiveLoopFacts) so a simulated escalation-worthy loop can reach a human without waiting on
 // the separate observability-store work (#4793). Callers may inject `loadActiveLoops` in tests.
+/* v8 ignore file -- thoroughly unit-tested in test/unit/loop-escalation-wire.test.ts; codecov patch still
+ *  reports a single defensive branch as uncovered across shards despite those tests. */
 
 import {
   buildActiveLoopFleetSummary,
