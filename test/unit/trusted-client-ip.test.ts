@@ -84,6 +84,41 @@ describe("trusted-client-ip (self-host rate-limit identity)", () => {
     expect(peerRemoteAddress({ incoming: { socket: { remoteAddress: 123 } } })).toBeUndefined();
   });
 
+  it("accepts bracketed IPv6 peers/headers and rejects malformed IPv4/IPv6", () => {
+    expect(
+      resolveTrustedClientIp("[2001:db8::1]", new Headers()),
+    ).toBe("2001:db8::1");
+    expect(
+      resolveTrustedClientIp("10.0.0.2", new Headers({ "x-real-ip": "[2001:db8::abcd]" })),
+    ).toBe("2001:db8::abcd");
+    expect(resolveTrustedClientIp("1.2.3", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("1.2.3.4.5", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("1.2.3.999", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("1.2.3.a", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("gggg::1", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("2001:db8:::1", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("1:2:3:4:5:6:7:8:9", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("2001:db8::zzzz", new Headers())).toBe("unknown-ip");
+    expect(resolveTrustedClientIp("notaip", new Headers())).toBe("unknown-ip");
+  });
+
+  it("classifies expanded loopback and unique-local IPv6 peers", () => {
+    expect(isPrivateOrLinkLocal("0:0:0:0:0:0:0:1")).toBe(true);
+    expect(isPrivateOrLinkLocal("FE80::1")).toBe(true);
+    expect(isPrivateOrLinkLocal("fd12::1")).toBe(true);
+    expect(isPrivateOrLinkLocal("not.an.ip.addr")).toBe(false);
+    expect(isPrivateOrLinkLocal("8.8.8.8")).toBe(false);
+  });
+
+  it("falls through XFF when X-Real-IP is present but invalid behind a private hop", () => {
+    expect(
+      resolveTrustedClientIp(
+        "10.0.0.2",
+        new Headers({ "x-real-ip": "not-an-ip", "x-forwarded-for": "198.51.100.77, 10.0.0.2" }),
+      ),
+    ).toBe("198.51.100.77");
+  });
+
   it("classifies private / link-local / loopback peers", () => {
     expect(isPrivateOrLinkLocal("10.1.2.3")).toBe(true);
     expect(isPrivateOrLinkLocal("192.168.0.1")).toBe(true);
