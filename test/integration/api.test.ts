@@ -6082,7 +6082,9 @@ describe("api routes", () => {
       maintainerNotes: [
         "Private reviewability note with wallet, hotkey, raw trust, and farming details.",
       ],
-      settings: { publicSurface: "off" },
+      // Keep Batch B label overrides from the prior upsert so later readiness/recommendation
+      // assertions still see gittensor-miner / createMissingLabel:false.
+      settings: { publicSurface: "off", createMissingLabel: false, gittensorLabel: "gittensor-miner" },
     });
     const policyReadiness = await app.request("/v1/repos/entrius/allways-ui/registration-readiness", { headers: apiHeaders(env) }, env);
     expect(policyReadiness.status).toBe(200);
