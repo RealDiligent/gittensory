@@ -63,4 +63,44 @@ describe("MCP loopover_check_test_evidence (#2235)", () => {
     expect(data.codeFileCount).toBe(0);
     expect(data.guidance.join(" ")).toMatch(/does not apply/i);
   });
+
+  it("credits free-text tests evidence when no test file is present, lifting absent to adequate (#6618)", async () => {
+    const client = await connect();
+    const result = await client.callTool({
+      name: "loopover_check_test_evidence",
+      arguments: { changedPaths: ["src/a.ts", "src/b.ts"], tests: ["ran `go test ./internal/entity` locally, no new file"] },
+    });
+    const data = result.structuredContent as Result;
+    expect(data.classification).toBe("adequate"); // lifted from the path-based "absent"
+    expect(data.testFileCount).toBeGreaterThanOrEqual(1);
+    expect(data.guidance.join(" ")).toMatch(/free-text `tests`/i); // distinct wording, not the path-derived lines
+    expect(data.guidance.join(" ")).not.toMatch(/looks strong/i);
+  });
+
+  it("does not credit an empty tests array — classification stays absent (#6618)", async () => {
+    const client = await connect();
+    const result = await client.callTool({
+      name: "loopover_check_test_evidence",
+      arguments: { changedPaths: ["src/a.ts", "src/b.ts"], tests: [] },
+    });
+    const data = result.structuredContent as Result;
+    expect(data.classification).toBe("absent");
+    expect(data.testFileCount).toBe(0);
+    expect(data.guidance.join(" ")).toMatch(/no test evidence/i);
+  });
+
+  it("does not apply the override above absent — a weak path classification stays weak (#6618)", async () => {
+    const client = await connect();
+    const result = await client.callTool({
+      name: "loopover_check_test_evidence",
+      arguments: {
+        changedPaths: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts", "src/e.ts"],
+        testFiles: ["test/a.test.ts"],
+        tests: ["ran the full suite locally"],
+      },
+    });
+    const data = result.structuredContent as Result;
+    expect(data.classification).toBe("weak"); // real path evidence already present → override must not fire
+    expect(data.guidance.join(" ")).toMatch(/weak/i);
+  });
 });
