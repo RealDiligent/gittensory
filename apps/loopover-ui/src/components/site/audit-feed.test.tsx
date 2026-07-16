@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
@@ -114,6 +114,20 @@ describe("AuditFeed", () => {
       "https://api.test/v1/app/skipped-pr-audit?limit=50",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("wraps the audit table in a keyboard-focusable, labelled scroll region with a caption and column-scoped headers (#794 a11y pattern)", async () => {
+    render(<AuditFeed />);
+    await screen.findByText("repo-owner/owned-repo");
+    const region = screen.getByRole("region", { name: "Skipped PR audit" });
+    // A bare overflow-x-auto div is not a tab stop; TableScroll makes it one (WCAG 2.1.1).
+    expect(region.tabIndex).toBe(0);
+    expect(region.className).toContain("overflow-x-auto");
+    const table = screen.getByRole("table", {
+      name: "Skipped pull requests with the time, repository, pull request, skip reason, and remediation for each.",
+    });
+    expect(within(table).getByRole("columnheader", { name: "Time" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Remediation" })).toBeTruthy();
   });
 
   it("shows an empty state when the audit export has no items", async () => {

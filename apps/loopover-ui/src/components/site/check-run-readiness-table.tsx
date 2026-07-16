@@ -1,4 +1,5 @@
 import { StatusPill, type Status } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import {
   COMPONENT_BAND_LABEL,
   READINESS_BAND_LABEL,
@@ -57,14 +58,28 @@ export function CheckRunReadinessTable({
         </StatusPill>
       </div>
 
-      <div className="overflow-hidden rounded-token border-hairline">
+      <TableScroll
+        className="rounded-token border-hairline"
+        label="Context check readiness signals"
+      >
         <table className="w-full text-left text-token-xs">
+          <caption className="sr-only">
+            Readiness signals with their band, evidence, and recommended action.
+          </caption>
           <thead className="border-b-hairline font-mono uppercase tracking-wider text-muted-foreground">
             <tr>
-              <th className="px-3 py-2 font-normal">Signal</th>
-              <th className="px-3 py-2 font-normal">Band</th>
-              <th className="px-3 py-2 font-normal">Evidence</th>
-              <th className="hidden px-3 py-2 font-normal lg:table-cell">Action</th>
+              <th scope="col" className="px-3 py-2 font-normal">
+                Signal
+              </th>
+              <th scope="col" className="px-3 py-2 font-normal">
+                Band
+              </th>
+              <th scope="col" className="px-3 py-2 font-normal">
+                Evidence
+              </th>
+              <th scope="col" className="hidden px-3 py-2 font-normal lg:table-cell">
+                Action
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -84,7 +99,7 @@ export function CheckRunReadinessTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </section>
   );
 }

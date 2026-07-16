@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the API layer so the component never touches the network.
@@ -56,6 +56,21 @@ describe("ActivationPreview", () => {
       expect.stringContaining("/v1/repos/acme/widgets/activation-preview"),
       expect.objectContaining({ label: "Activation preview" }),
     );
+  });
+
+  it("wraps the sample table in a keyboard-focusable, labelled scroll region with a caption and column-scoped headers (#794 a11y pattern)", async () => {
+    apiFetch.mockResolvedValue({ ok: true, data: BASE_PREVIEW });
+    render(<ActivationPreview reviewability={REVIEWABILITY} />);
+    await waitFor(() => expect(screen.getByText("Add cursor pagination")).toBeTruthy());
+    const region = screen.getByRole("region", { name: "Advisory preview sample PRs" });
+    // A bare overflow-hidden div is not a tab stop; TableScroll makes it one (WCAG 2.1.1).
+    expect(region.tabIndex).toBe(0);
+    expect(region.className).toContain("overflow-x-auto");
+    const table = screen.getByRole("table", {
+      name: "Sample pull requests with their title, severity, and finding count.",
+    });
+    expect(within(table).getByRole("columnheader", { name: "PR" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Findings" })).toBeTruthy();
   });
 
   it("renders an error state with the failure message when the preview fails to load", async () => {

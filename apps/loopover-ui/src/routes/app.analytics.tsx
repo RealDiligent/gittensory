@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Download } from "lucide-react";
 
 import { BoundaryBadge, Stat, StatusPill } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import { RefreshMeta } from "@/components/site/refresh-meta";
 import { StateActionButton, StateBoundary } from "@/components/site/state-views";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -420,17 +421,34 @@ function ProductAnalytics() {
                   ))}
                 </ul>
               ) : null}
-              <div className="mt-4 overflow-x-auto">
+              <TableScroll className="mt-4" label="Usage rollups">
                 <table className="w-full min-w-[680px] text-left text-token-sm">
+                  <caption className="sr-only">
+                    Daily usage rollups with status and event, actor, repo, and activation counts.
+                  </caption>
                   <thead className="border-b border-border text-token-xs uppercase text-muted-foreground">
                     <tr>
-                      <th className="py-2 pr-4 font-medium">Day</th>
-                      <th className="py-2 pr-4 font-medium">Status</th>
-                      <th className="py-2 pr-4 font-medium">Events</th>
-                      <th className="py-2 pr-4 font-medium">Actors</th>
-                      <th className="py-2 pr-4 font-medium">Repos</th>
-                      <th className="py-2 pr-4 font-medium">Activated</th>
-                      <th className="py-2 font-medium">GitHub activated</th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Day
+                      </th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Status
+                      </th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Events
+                      </th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Actors
+                      </th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Repos
+                      </th>
+                      <th scope="col" className="py-2 pr-4 font-medium">
+                        Activated
+                      </th>
+                      <th scope="col" className="py-2 font-medium">
+                        GitHub activated
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -449,7 +467,7 @@ function ProductAnalytics() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             </section>
           ) : null}
         </div>

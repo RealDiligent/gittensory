@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }));
@@ -121,6 +121,20 @@ describe("DeadLetterQueuePanel", () => {
     // A null lastError renders as an em dash, not "null" or an empty cell.
     const dashCells = screen.getAllByText("—");
     expect(dashCells.length).toBeGreaterThan(0);
+  });
+
+  it("wraps the queue table in a keyboard-focusable, labelled scroll region with a caption and column-scoped headers (#794 a11y pattern)", async () => {
+    render(<DeadLetterQueuePanel />);
+    await screen.findByText("github-webhook");
+    const region = screen.getByRole("region", { name: "Dead letter queue" });
+    // A bare overflow-x-auto div is not a tab stop; TableScroll makes it one (WCAG 2.1.1).
+    expect(region.tabIndex).toBe(0);
+    expect(region.className).toContain("overflow-x-auto");
+    const table = screen.getByRole("table", {
+      name: "Failed background jobs with their ID, type, attempt count, last error, timestamps, and retry actions.",
+    });
+    expect(within(table).getByRole("columnheader", { name: "Job ID" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Actions" })).toBeTruthy();
   });
 
   it("shows an empty state when the queue has no dead-letter jobs", async () => {

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, Copy, Download, History, Loader2, RefreshCw } from "lucide-react";
 
 import { KeyValueGrid, StatusPill, type Status } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import { McpVersionBadge } from "@/components/site/mcp-version-badge";
 import { StatCard } from "@/components/site/primitives";
 import { RefreshMeta } from "@/components/site/refresh-meta";
@@ -364,42 +365,54 @@ export function MinerPanel() {
                 <p className="mt-1 text-token-xs text-muted-foreground">
                   Where to spend time, and where not to.
                 </p>
-                <table className="mt-4 w-full text-left text-token-sm">
-                  <thead>
-                    <tr className="border-b-hairline font-mono text-token-2xs uppercase tracking-wider text-muted-foreground">
-                      <th className="py-2 pr-3 font-normal">Repo</th>
-                      <th className="py-2 pr-3 font-normal">Lane</th>
-                      <th className="py-2 font-normal">Why</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.repoFit.map((repo, index) => {
-                      const lane = repo.lane ?? "pursue";
-                      return (
-                        <tr
-                          key={`${repo.repoFullName ?? index}`}
-                          className="border-b-hairline last:border-b-0 transition-colors hover:bg-muted/40"
-                        >
-                          <td className="py-2 pr-3 align-top">
-                            <div className="break-all font-mono text-token-xs text-foreground/90">
-                              {repo.repoFullName ?? "repo pending"}
-                            </div>
-                            <RecommendationChangeInline change={repo.change} />
-                          </td>
-                          <td className="py-2 pr-3 align-top">
-                            <StatusPill status={LANE_TONE[lane] ?? "info"}>{lane}</StatusPill>
-                          </td>
-                          <td className="py-2 align-top text-token-xs text-muted-foreground">
-                            {repo.why ??
-                              repo.rationale ??
-                              repo.recommendation ??
-                              "No rationale recorded."}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <TableScroll className="mt-4" label="Repo fit">
+                  <table className="w-full text-left text-token-sm">
+                    <caption className="sr-only">
+                      Repositories with their recommended lane and rationale for where to spend
+                      time.
+                    </caption>
+                    <thead>
+                      <tr className="border-b-hairline font-mono text-token-2xs uppercase tracking-wider text-muted-foreground">
+                        <th scope="col" className="py-2 pr-3 font-normal">
+                          Repo
+                        </th>
+                        <th scope="col" className="py-2 pr-3 font-normal">
+                          Lane
+                        </th>
+                        <th scope="col" className="py-2 font-normal">
+                          Why
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.repoFit.map((repo, index) => {
+                        const lane = repo.lane ?? "pursue";
+                        return (
+                          <tr
+                            key={`${repo.repoFullName ?? index}`}
+                            className="border-b-hairline last:border-b-0 transition-colors hover:bg-muted/40"
+                          >
+                            <td className="py-2 pr-3 align-top">
+                              <div className="break-all font-mono text-token-xs text-foreground/90">
+                                {repo.repoFullName ?? "repo pending"}
+                              </div>
+                              <RecommendationChangeInline change={repo.change} />
+                            </td>
+                            <td className="py-2 pr-3 align-top">
+                              <StatusPill status={LANE_TONE[lane] ?? "info"}>{lane}</StatusPill>
+                            </td>
+                            <td className="py-2 align-top text-token-xs text-muted-foreground">
+                              {repo.why ??
+                                repo.rationale ??
+                                repo.recommendation ??
+                                "No rationale recorded."}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </TableScroll>
               </div>
             </section>
           </div>

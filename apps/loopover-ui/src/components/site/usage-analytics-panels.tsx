@@ -1,4 +1,5 @@
 import { Stat, StatusPill } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 
 type WeeklyMetric = {
   id: string;
@@ -199,14 +200,25 @@ export function CommandUsefulnessPanel({
         />
       </div>
       {commands.length > 0 ? (
-        <div className="mt-4 overflow-x-auto">
+        <TableScroll className="mt-4" label="Command feedback">
           <table className="w-full min-w-[480px] text-left text-token-sm">
+            <caption className="sr-only">
+              Commands with their feedback count, useful count, and usefulness rate.
+            </caption>
             <thead className="border-b border-border text-token-xs uppercase text-muted-foreground">
               <tr>
-                <th className="py-2 pr-4 font-medium">Command</th>
-                <th className="py-2 pr-4 font-medium">Feedback</th>
-                <th className="py-2 pr-4 font-medium">Useful</th>
-                <th className="py-2 font-medium">Rate</th>
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Command
+                </th>
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Feedback
+                </th>
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Useful
+                </th>
+                <th scope="col" className="py-2 font-medium">
+                  Rate
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -222,7 +234,7 @@ export function CommandUsefulnessPanel({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       ) : (
         <p className="mt-4 text-token-xs text-muted-foreground">
           No command feedback recorded in this window.

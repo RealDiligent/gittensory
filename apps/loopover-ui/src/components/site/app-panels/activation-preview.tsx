@@ -2,6 +2,7 @@ import { CheckCircle2, Loader2, Rocket } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { StatusPill, type Status } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import { StateBoundary } from "@/components/site/state-views";
 import { apiFetch } from "@/lib/api/request";
 import { getApiOrigin } from "@/lib/api/origin";
@@ -250,14 +251,25 @@ function ActivationPreviewBody({
       ) : null}
 
       {preview.samples.length > 0 ? (
-        <div className="overflow-hidden rounded-token border-hairline">
+        <TableScroll className="rounded-token border-hairline" label="Advisory preview sample PRs">
           <table className="w-full text-left text-token-xs">
+            <caption className="sr-only">
+              Sample pull requests with their title, severity, and finding count.
+            </caption>
             <thead className="border-b-hairline font-mono uppercase tracking-wider text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 font-normal">PR</th>
-                <th className="px-3 py-2 font-normal">Title</th>
-                <th className="px-3 py-2 font-normal">Severity</th>
-                <th className="px-3 py-2 font-normal">Findings</th>
+                <th scope="col" className="px-3 py-2 font-normal">
+                  PR
+                </th>
+                <th scope="col" className="px-3 py-2 font-normal">
+                  Title
+                </th>
+                <th scope="col" className="px-3 py-2 font-normal">
+                  Severity
+                </th>
+                <th scope="col" className="px-3 py-2 font-normal">
+                  Findings
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -275,7 +287,7 @@ function ActivationPreviewBody({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">

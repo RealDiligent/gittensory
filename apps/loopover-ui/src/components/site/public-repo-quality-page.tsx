@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getApiOrigin } from "@/lib/api/origin";
 import { apiFetch } from "@/lib/api/request";
+import { TableScroll } from "@/components/site/data-table";
 import { Card, Section, SectionTitle } from "@/components/site/primitives";
 
 export type PublicQualityMetrics = {
@@ -152,14 +153,25 @@ export function PublicRepoQualityPage({ owner, repo }: { owner: string; repo: st
 
         <div className="mt-10">
           <h2 className="text-token-lg font-medium">Weekly trend</h2>
-          <div className="mt-4 overflow-x-auto">
+          <TableScroll className="mt-4" label="Weekly trend">
             <table className="w-full min-w-[36rem] text-left text-token-sm">
+              <caption className="sr-only">
+                Weekly gate false-positive rate, merge ratio, and blocked count.
+              </caption>
               <thead className="text-token-xs text-muted-foreground">
                 <tr>
-                  <th className="pb-2 pr-4 font-medium">Week</th>
-                  <th className="pb-2 pr-4 font-medium">Gate FP rate</th>
-                  <th className="pb-2 pr-4 font-medium">Merge ratio</th>
-                  <th className="pb-2 font-medium">Blocks</th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    Week
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    Gate FP rate
+                  </th>
+                  <th scope="col" className="pb-2 pr-4 font-medium">
+                    Merge ratio
+                  </th>
+                  <th scope="col" className="pb-2 font-medium">
+                    Blocks
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -179,7 +191,7 @@ export function PublicRepoQualityPage({ owner, repo }: { owner: string; repo: st
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </div>
       </div>
     </Section>

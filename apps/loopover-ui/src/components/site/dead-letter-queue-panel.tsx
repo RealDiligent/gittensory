@@ -11,6 +11,7 @@ import {
   type DeadLetterQueueItem,
 } from "@/components/site/dead-letter-queue-panel-model";
 import { StatusPill } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import { StateActionButton, StateBoundary } from "@/components/site/state-views";
 import {
   AlertDialog,
@@ -242,17 +243,38 @@ function DeadLetterQueueTable({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto rounded-token border border-border bg-transparent">
+      <TableScroll
+        className="rounded-token border border-border bg-transparent"
+        label="Dead letter queue"
+      >
         <table className="w-full min-w-[880px] text-left text-token-sm">
+          <caption className="sr-only">
+            Failed background jobs with their ID, type, attempt count, last error, timestamps, and
+            retry actions.
+          </caption>
           <thead className="border-b border-border text-token-xs uppercase text-muted-foreground">
             <tr>
-              <th className="px-4 py-3 font-medium">Job ID</th>
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Attempts</th>
-              <th className="px-4 py-3 font-medium">Last error</th>
-              <th className="px-4 py-3 font-medium">Created</th>
-              <th className="px-4 py-3 font-medium">Died</th>
-              <th className="px-4 py-3 font-medium">Actions</th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Job ID
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Type
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Attempts
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Last error
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Created
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Died
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -329,7 +351,7 @@ function DeadLetterQueueTable({
             })}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-token-2xs text-muted-foreground">

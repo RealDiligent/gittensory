@@ -14,6 +14,7 @@ import {
   type SkippedPrAuditReason,
 } from "@/components/site/audit-feed-model";
 import { BoundaryBadge, StatusPill } from "@/components/site/control-primitives";
+import { TableScroll } from "@/components/site/data-table";
 import {
   EmptyState,
   ErrorState,
@@ -184,15 +185,32 @@ export function AuditFeed({ enabled = true }: AuditFeedProps) {
         onReset={resetFilters}
       />
 
-      <div className="overflow-x-auto rounded-token border border-border bg-transparent">
+      <TableScroll
+        className="rounded-token border border-border bg-transparent"
+        label="Skipped PR audit"
+      >
         <table className="w-full min-w-[760px] text-left text-token-sm">
+          <caption className="sr-only">
+            Skipped pull requests with the time, repository, pull request, skip reason, and
+            remediation for each.
+          </caption>
           <thead className="border-b border-border text-token-xs uppercase text-muted-foreground">
             <tr>
-              <th className="px-4 py-3 font-medium">Time</th>
-              <th className="px-4 py-3 font-medium">Repository</th>
-              <th className="px-4 py-3 font-medium">Pull request</th>
-              <th className="px-4 py-3 font-medium">Reason</th>
-              <th className="px-4 py-3 font-medium">Remediation</th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Time
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Repository
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Pull request
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Reason
+              </th>
+              <th scope="col" className="px-4 py-3 font-medium">
+                Remediation
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -228,7 +246,7 @@ export function AuditFeed({ enabled = true }: AuditFeedProps) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <div className="flex flex-wrap items-center gap-3">
         {data.hasMore && limit < MAX_LIMIT ? (

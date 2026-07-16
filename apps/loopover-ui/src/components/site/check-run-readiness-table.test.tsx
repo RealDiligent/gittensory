@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { CheckRunReadinessTable } from "@/components/site/check-run-readiness-table";
@@ -53,6 +53,19 @@ describe("CheckRunReadinessTable", () => {
     expect(screen.getByText("Test plan noted but not verified.")).toBeTruthy();
     expect(screen.getByText("Developing")).toBeTruthy();
     expect(screen.getByText("Partial")).toBeTruthy();
+  });
+
+  it("wraps the table in a keyboard-focusable, labelled scroll region with a caption and column-scoped headers (#794 a11y pattern)", () => {
+    render(<CheckRunReadinessTable detailLevel="standard" readiness={SAMPLE} />);
+    const region = screen.getByRole("region", { name: "Context check readiness signals" });
+    // A bare overflow-hidden/overflow-x-auto div is not a tab stop; TableScroll makes it one.
+    expect(region.tabIndex).toBe(0);
+    expect(region.className).toContain("overflow-x-auto");
+    const table = screen.getByRole("table", {
+      name: "Readiness signals with their band, evidence, and recommended action.",
+    });
+    expect(within(table).getByRole("columnheader", { name: "Signal" })).toBeTruthy();
+    expect(within(table).getByRole("columnheader", { name: "Action" })).toBeTruthy();
   });
 
   it("hides the table at minimal detail level", () => {
