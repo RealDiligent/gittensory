@@ -123,6 +123,36 @@ describe("world-class backend signals", () => {
     expect(report.clusters[0]?.items.map((item) => item.number)).toContain(7);
   });
 
+  it("does not escalate a single-real-PR issue cluster to high risk from unscoped issue.linkedPrs text mentions (regression)", () => {
+    // Issue #40 has exactly ONE real open PR (#12) that closes it via `linkedIssues`, but the issue's own
+    // cached `linkedPrs` (parsed from contributor-controlled issue body text, e.g. "see PR #8 and PR #9 for
+    // earlier discussion") mentions two PR numbers that are not actually competing work. The cluster's risk
+    // must be driven only by the genuinely-scoped `linkedPrs` (real open PRs), not this raw text-mention field.
+    const soloIssue: IssueRecord = {
+      repoFullName: repo.fullName,
+      number: 40,
+      title: "Solo-linked issue with unrelated body mentions",
+      state: "open",
+      authorLogin: "reporter",
+      labels: ["bug"],
+      linkedPrs: [8, 9],
+    };
+    const solePr: PullRequestRecord = {
+      repoFullName: repo.fullName,
+      number: 12,
+      title: "Fix solo-linked issue",
+      state: "open",
+      authorLogin: "oktofeesh1",
+      authorAssociation: "NONE",
+      labels: ["bug"],
+      linkedIssues: [40],
+      updatedAt: "2026-04-01T00:00:00.000Z",
+    };
+    const report = buildCollisionReport(repo.fullName, [soloIssue], [solePr]);
+    const cluster = report.clusters.find((entry) => entry.id === "issue-40");
+    expect(cluster?.risk).toBe("medium");
+  });
+
   it("builds maintainer burden from queue hygiene signals", () => {
     const collisions = buildCollisionReport(repo.fullName, issues, pullRequests);
     const health = buildQueueHealth(repo, issues, pullRequests, collisions);
