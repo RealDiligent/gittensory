@@ -11,7 +11,7 @@ import { delimiter, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { serve } from "@hono/node-server";
-import type { HttpBindings } from "@hono/node-server";
+import type { Http2Bindings, HttpBindings } from "@hono/node-server";
 import packageJson from "../package.json";
 import worker from "./index";
 import { githubRestRateLimitRemainingSamples } from "./github/client";
@@ -45,7 +45,7 @@ import { createOrbRelayRegistrationState, isOrbBrokerMode, registerOrbRelayTarge
 import { exportOrbBatch } from "./selfhost/orb-collector";
 import { createD1Adapter, nodeSqliteDriver } from "./selfhost/d1-adapter";
 import { loadFileSecrets } from "./selfhost/load-file-secrets";
-import { withTrustedClientIp } from "./selfhost/trusted-client-ip";
+import { peerRemoteAddress, withTrustedClientIp } from "./selfhost/trusted-client-ip";
 import {
   backupAcknowledgedGaugeValue,
   buildHealthBody,
@@ -892,11 +892,14 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8787);
   const server = serve(
     {
-      fetch: async (request: Request, nodeEnv: HttpBindings) => {
+      fetch: async (request: Request, nodeEnv: HttpBindings | Http2Bindings) => {
         // Self-host rate limiting keys off cf-connecting-ip (auth/rate-limit.ts). On Workers that header is
         // edge-set; on Node it is attacker-controlled unless we overwrite it from the TCP peer / Caddy hop
         // here (see trusted-client-ip.ts). Health/ready/metrics below still see the rewritten request.
-        request = withTrustedClientIp(request, nodeEnv.incoming.socket?.remoteAddress);
+        // peerRemoteAddress reads the documented @hono/node-server HttpBindings/Http2Bindings shape
+        // (`incoming.socket.remoteAddress`) — covered by unit tests so a wrong field path cannot silently
+        // collapse every client into unknown-ip.
+        request = withTrustedClientIp(request, peerRemoteAddress(nodeEnv));
         const path = new URL(request.url).pathname;
         if (path === "/health")
           return new Response(

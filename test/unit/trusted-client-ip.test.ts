@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isPrivateOrLinkLocal,
+  peerRemoteAddress,
   resolveTrustedClientIp,
   withTrustedClientIp,
 } from "../../src/selfhost/trusted-client-ip";
@@ -70,6 +71,17 @@ describe("trusted-client-ip (self-host rate-limit identity)", () => {
       undefined,
     );
     expect(trusted.headers.get("cf-connecting-ip")).toBeNull();
+  });
+
+  it("peerRemoteAddress reads the documented HttpBindings/Http2Bindings socket path", () => {
+    expect(peerRemoteAddress({ incoming: { socket: { remoteAddress: "10.0.0.2" } } })).toBe("10.0.0.2");
+    expect(peerRemoteAddress({ incoming: { socket: { remoteAddress: "203.0.113.9" } } })).toBe("203.0.113.9");
+    expect(peerRemoteAddress({ incoming: { socket: null } })).toBeUndefined();
+    expect(peerRemoteAddress({ incoming: null })).toBeUndefined();
+    expect(peerRemoteAddress({})).toBeUndefined();
+    expect(peerRemoteAddress(null)).toBeUndefined();
+    expect(peerRemoteAddress(undefined)).toBeUndefined();
+    expect(peerRemoteAddress({ incoming: { socket: { remoteAddress: 123 } } })).toBeUndefined();
   });
 
   it("classifies private / link-local / loopback peers", () => {

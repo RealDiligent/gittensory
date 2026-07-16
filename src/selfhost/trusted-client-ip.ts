@@ -25,6 +25,19 @@ export function resolveTrustedClientIp(
   return peer ?? "unknown-ip";
 }
 
+/** Read the TCP peer from @hono/node-server's documented fetch second argument (`HttpBindings` /
+ *  `Http2Bindings`: `incoming.socket.remoteAddress`). Exported so server.ts wiring is unit-testable
+ *  without booting serve(). Accepts `unknown` so HttpBindings | Http2Bindings both type-check. */
+export function peerRemoteAddress(nodeEnv: unknown): string | undefined {
+  if (!nodeEnv || typeof nodeEnv !== "object") return undefined;
+  const incoming = (nodeEnv as { incoming?: unknown }).incoming;
+  if (!incoming || typeof incoming !== "object") return undefined;
+  const socket = (incoming as { socket?: unknown }).socket;
+  if (!socket || typeof socket !== "object") return undefined;
+  const remote = (socket as { remoteAddress?: unknown }).remoteAddress;
+  return typeof remote === "string" ? remote : undefined;
+}
+
 /** Return a Request whose `cf-connecting-ip` is the Node-edge-trusted client IP (see resolveTrustedClientIp). */
 export function withTrustedClientIp(request: Request, peerAddress: string | undefined): Request {
   const headers = new Headers(request.headers);
