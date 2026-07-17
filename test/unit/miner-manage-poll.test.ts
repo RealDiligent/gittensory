@@ -23,6 +23,7 @@ import {
   closeDefaultPortfolioQueueStore,
   initPortfolioQueueStore,
 } from "../../packages/loopover-miner/lib/portfolio-queue.js";
+import { DEFAULT_FORGE_CONFIG } from "../../packages/loopover-miner/lib/forge-config.js";
 
 const roots: string[] = [];
 const stores: Array<{ close(): void }> = [];
@@ -136,6 +137,47 @@ describe("loopover-miner manage poll (#2323/#2325)", () => {
         queueStatus: "queued",
       }),
     ]);
+  });
+
+  it("REGRESSION: scopes the managed-PR queue row to the polled forge host instead of silently defaulting to github.com (#6764)", async () => {
+    const { portfolioQueue, eventLedger } = tempStores();
+    const apiBaseUrl = "https://ghe.acme.example/api/v3";
+    const pollCheckRuns = vi.fn().mockResolvedValue(pollResult("success"));
+
+    await recordManagePollSnapshot(
+      { repoFullName: "acme/widgets", prNumber: 12, branch: "fix/ci" },
+      { eventLedger, portfolioQueue, pollCheckRuns, githubToken: "token", apiBaseUrl },
+    );
+
+    // The CI poll is already host-scoped two lines away; the queue row it ensures must match it.
+    expect(pollCheckRuns).toHaveBeenCalledWith("acme/widgets", 12, expect.objectContaining({ apiBaseUrl }));
+    expect(portfolioQueue.listQueue("acme/widgets")).toEqual([
+      expect.objectContaining({ apiBaseUrl, identifier: "pr:12", status: "queued", priority: 0 }),
+    ]);
+  });
+
+  it("REGRESSION: a same-named repo+PR already tracked on ANOTHER forge host does not suppress this host's row (#6764)", async () => {
+    const { portfolioQueue, eventLedger } = tempStores();
+    const otherHost = "https://ghe.acme.example/api/v3";
+    // The SAME owner/repo + PR number, already queued against a DIFFERENT forge host. The queue's composite
+    // (api_base_url, repo_full_name, identifier) key exists precisely so these two never collide (#5563).
+    portfolioQueue.enqueue({ repoFullName: "acme/widgets", identifier: "pr:12", priority: 0, apiBaseUrl: otherHost });
+
+    await recordManagePollSnapshot(
+      { repoFullName: "acme/widgets", prNumber: 12, branch: "fix/ci" },
+      {
+        eventLedger,
+        portfolioQueue,
+        pollCheckRuns: vi.fn().mockResolvedValue(pollResult("success")),
+        githubToken: "token",
+      },
+    );
+
+    // Before the fix, the forge-blind existence check matched the other host's row on identifier alone and
+    // skipped creating this host's row entirely.
+    const rows = portfolioQueue.listQueue("acme/widgets");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.apiBaseUrl).sort()).toEqual([DEFAULT_FORGE_CONFIG.apiBaseUrl, otherHost].sort());
   });
 
   it("runManagePoll prints summary and JSON output with injected stores", async () => {

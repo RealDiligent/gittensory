@@ -5,6 +5,7 @@ import {
   formatManagedPrIdentifier,
 } from "./manage-status.js";
 import { initPortfolioQueueStore } from "./portfolio-queue.js";
+import { DEFAULT_FORGE_CONFIG } from "./forge-config.js";
 import { argsWantJson, describeCliError, reportCliFailure } from "./cli-error.js";
 import { resolveGitHubToken } from "./github-token-resolution.js";
 
@@ -105,13 +106,27 @@ export function parseManagePollArgs(args = []) {
   };
 }
 
-function ensureManagedPrRow(portfolioQueue, repoFullName, prNumber) {
+/** The forge host a managed-PR row belongs to. Mirrors portfolio-queue-manager.js's own fold (and every
+ *  store's `normalizeApiBaseUrl`): omitted/blank → the github.com default, so a single-forge caller is
+ *  unaffected. Used only to COMPARE hosts here; `enqueue` still does its own normalization/validation. */
+function resolveManagedRowApiBaseUrl(apiBaseUrl) {
+  return typeof apiBaseUrl === "string" && apiBaseUrl.trim() ? apiBaseUrl.trim() : DEFAULT_FORGE_CONFIG.apiBaseUrl;
+}
+
+function ensureManagedPrRow(portfolioQueue, repoFullName, prNumber, apiBaseUrl) {
   const identifier = formatManagedPrIdentifier(prNumber);
+  // `listQueue(repoFullName)` is forge-BLIND, so the existence check has to compare the host too: the queue's
+  // composite (api_base_url, repo_full_name, identifier) key exists precisely so two hosts serving the same
+  // owner/repo name never collide (#5563). Without this scoping, the same repo+PR-number already tracked on
+  // ANOTHER host suppresses this host's row entirely.
+  const targetApiBaseUrl = resolveManagedRowApiBaseUrl(apiBaseUrl);
   const exists = portfolioQueue
     .listQueue(repoFullName)
-    .some((entry) => entry.identifier === identifier);
+    .some((entry) => entry.identifier === identifier && resolveManagedRowApiBaseUrl(entry.apiBaseUrl) === targetApiBaseUrl);
   if (!exists) {
-    portfolioQueue.enqueue({ repoFullName, identifier, priority: 0 });
+    // Thread the SAME apiBaseUrl the CI poll above used, so the row is scoped to the host it was polled from
+    // instead of silently defaulting to github.com.
+    portfolioQueue.enqueue({ repoFullName, identifier, priority: 0, apiBaseUrl });
   }
 }
 
@@ -155,7 +170,7 @@ export async function recordManagePollSnapshot(input, options = {}) {
   });
 
   if ((options.ensurePortfolioRow ?? true) && portfolioQueue) {
-    ensureManagedPrRow(portfolioQueue, repoFullName, input.prNumber);
+    ensureManagedPrRow(portfolioQueue, repoFullName, input.prNumber, options.apiBaseUrl);
   }
 
   const event = eventLedger.appendEvent({
