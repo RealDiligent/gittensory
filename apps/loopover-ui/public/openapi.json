@@ -14405,6 +14405,96 @@
           "summary",
           "outcomes"
         ]
+      },
+      "ContributorNotificationFeed": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "unreadCount": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "notifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "eventType": {
+                  "type": "string"
+                },
+                "repoFullName": {
+                  "type": "string"
+                },
+                "pullNumber": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "deeplink": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "read"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "eventType",
+                "repoFullName",
+                "pullNumber",
+                "title",
+                "body",
+                "deeplink",
+                "status",
+                "createdAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "login",
+          "unreadCount",
+          "summary",
+          "notifications"
+        ]
+      },
+      "ContributorNotificationsMarkRead": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "marked": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "marked",
+          "summary"
+        ]
       }
     },
     "parameters": {},
@@ -18680,6 +18770,94 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ContributorPrOutcomes"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/v1/contributors/{login}/notifications": {
+      "get": {
+        "summary": "Contributor notification feed",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Self-scoped badge notification feed with unread count (mirrors loopover_list_notifications).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorNotificationFeed"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/v1/contributors/{login}/notifications/read": {
+      "post": {
+        "summary": "Mark contributor notifications read",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Count of notifications marked read (mirrors loopover_mark_notifications_read).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorNotificationsMarkRead"
                 }
               }
             }

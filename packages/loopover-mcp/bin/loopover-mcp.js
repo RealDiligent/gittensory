@@ -90,6 +90,8 @@ const CLI_COMMAND_SPEC = {
   "contributor-profile": [],
   "monitor-open-prs": [],
   "pr-outcomes": [],
+  notifications: [],
+  "mark-notifications-read": [],
   "analyze-branch": [],
   preflight: [],
   "review-pr": [],
@@ -1138,6 +1140,18 @@ const STDIO_TOOL_DESCRIPTORS = [
       "Return a contributor's own post-merge outcome records — for each merged PR, a public-safe attribution of what it did for their standing on the repo. Self-scoped: only the authenticated login's outcomes.",
   },
   {
+    name: "loopover_list_notifications",
+    category: "utility",
+    description:
+      "Return a contributor's own LoopOver notifications (e.g. changes requested on their PRs) and unread badge count. Self-scoped: only the authenticated login's notifications.",
+  },
+  {
+    name: "loopover_mark_notifications_read",
+    category: "utility",
+    description:
+      "Mark a contributor's own delivered notifications as read (clears the badge). Self-scoped; pass `ids` to clear specific notifications or omit to clear all.",
+  },
+  {
     name: "loopover_compare_pr_variants",
     category: "branch",
     description: "Compare private LoopOver scoring previews across local/metadata variants.",
@@ -2089,6 +2103,33 @@ registerStdioTool(
   async ({ login, limit }) => {
     const payload = await getPrOutcomes(login, limit);
     return toolResult(prOutcomesToolSummary(login, payload), payload);
+  },
+);
+
+registerStdioTool(
+  "loopover_list_notifications",
+  {
+    description: stdioToolDescription("loopover_list_notifications"),
+    inputSchema: loginShape,
+  },
+  async ({ login }) => {
+    const payload = await getNotifications(login);
+    return toolResult(notificationsToolSummary(login, payload), payload);
+  },
+);
+
+registerStdioTool(
+  "loopover_mark_notifications_read",
+  {
+    description: stdioToolDescription("loopover_mark_notifications_read"),
+    inputSchema: {
+      login: z.string().min(1),
+      ids: z.array(z.string().min(1).max(128)).max(100).optional(),
+    },
+  },
+  async ({ login, ids }) => {
+    const payload = await markNotificationsRead(login, ids);
+    return toolResult(markNotificationsReadToolSummary(login, payload), payload);
   },
 );
 
@@ -3399,6 +3440,8 @@ async function runCli(args) {
   if (command === "contributor-profile") return contributorProfileCli(options);
   if (command === "monitor-open-prs") return monitorOpenPrsCli(options);
   if (command === "pr-outcomes") return prOutcomesCli(options);
+  if (command === "notifications") return notificationsCli(options);
+  if (command === "mark-notifications-read") return markNotificationsReadCli(options);
   if (command === "review-pr") return reviewPrCli(options);
   if (command !== "analyze-branch" && command !== "preflight") {
     const suggestion = suggestCommand(command);
@@ -3900,6 +3943,63 @@ async function prOutcomesCli(options) {
   }
 }
 
+function printNotificationsHelp() {
+  process.stdout.write(
+    [
+      "Usage: loopover-mcp notifications --login <github-login> [--json]",
+      "",
+      "List your LoopOver notification feed and unread badge count.",
+      "Mirrors the loopover_list_notifications MCP tool and GET /v1/contributors/{login}/notifications. No source upload.",
+      "",
+      "Pass --json for machine-readable output.",
+    ].join("\n") + "\n",
+  );
+}
+
+async function notificationsCli(options) {
+  if (options.help === true) return printNotificationsHelp();
+  const login = options.login ?? process.env.LOOPOVER_LOGIN ?? process.env.GITHUB_LOGIN;
+  if (!login) throw new Error("Pass --login <github-login> or set LOOPOVER_LOGIN.");
+  const payload = await getNotifications(login);
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`${sanitizePlainTextTerminalOutput(notificationsToolSummary(login, payload))}\n`);
+  for (const item of payload?.notifications ?? []) {
+    const heading = `${item.status} ${item.repoFullName}${item.pullNumber != null ? `#${item.pullNumber}` : ""} — ${item.title}`;
+    process.stdout.write(`${sanitizePlainTextTerminalOutput(heading)}\n`);
+  }
+}
+
+function printMarkNotificationsReadHelp() {
+  process.stdout.write(
+    [
+      "Usage: loopover-mcp mark-notifications-read --login <github-login> [--id <delivery-id>]... [--json]",
+      "",
+      "Mark your delivered LoopOver notifications as read (clears the badge).",
+      "Mirrors the loopover_mark_notifications_read MCP tool and POST /v1/contributors/{login}/notifications/read.",
+      "Omit --id to mark all; pass --id repeatedly to mark specific deliveries.",
+      "",
+      "Pass --json for machine-readable output.",
+    ].join("\n") + "\n",
+  );
+}
+
+async function markNotificationsReadCli(options) {
+  if (options.help === true) return printMarkNotificationsReadHelp();
+  const login = options.login ?? process.env.LOOPOVER_LOGIN ?? process.env.GITHUB_LOGIN;
+  if (!login) throw new Error("Pass --login <github-login> or set LOOPOVER_LOGIN.");
+  const rawIds = options.id;
+  const ids = rawIds === undefined || rawIds === true ? undefined : Array.isArray(rawIds) ? rawIds : [rawIds];
+  const payload = await markNotificationsRead(login, ids);
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`${sanitizePlainTextTerminalOutput(markNotificationsReadToolSummary(login, payload))}\n`);
+}
+
 function printRepoDecisionHelp() {
   process.stdout.write(
     [
@@ -4380,6 +4480,8 @@ function printHelp() {
   loopover-mcp repo-decision --login <github-login> --repo owner/repo [--json]
   loopover-mcp monitor-open-prs --login <github-login> [--json]
   loopover-mcp pr-outcomes --login <github-login> [--limit N] [--json]
+  loopover-mcp notifications --login <github-login> [--json]
+  loopover-mcp mark-notifications-read --login <github-login> [--id <delivery-id>]... [--json]
   loopover-mcp analyze-branch --login <github-login> [--repo owner/repo] [--base origin/main] [--branch-eligibility eligible|ineligible|unknown] [--pending-merged-prs 3] [--expected-open-prs 0] [--projected-credibility 0.8] [--scenario-note "..."] [--validation "passed|npm test|summary"] [--format table] [--json]
   loopover-mcp preflight --login <github-login> [--repo owner/repo] [--base origin/main] [--branch-eligibility eligible|ineligible|unknown] [--pending-merged-prs 3] [--expected-open-prs 0] [--projected-credibility 0.8] [--validation "passed|npm test|summary"] [--format table] [--json]
   loopover-mcp review-pr --login <github-login> [--repo owner/repo] [--base origin/main] [--commit <message>]... [--body <text>] [--body-file <path>] [--linked-issue <number>] [--json]
@@ -4398,7 +4500,7 @@ function printHelp() {
   LOOPOVER_PROFILE
   LOOPOVER_CONFIG_PATH or LOOPOVER_CONFIG_DIR
   LOOPOVER_API_TOKEN, LOOPOVER_MCP_TOKEN, LOOPOVER_TOKEN, or a session from loopover-mcp login
-  LOOPOVER_LOGIN or GITHUB_LOGIN (default --login for analyze-branch, preflight, review-pr, decision-pack, repo-decision, monitor-open-prs, pr-outcomes, and agent plan/packet)
+  LOOPOVER_LOGIN or GITHUB_LOGIN (default --login for analyze-branch, preflight, review-pr, decision-pack, repo-decision, monitor-open-prs, pr-outcomes, notifications, mark-notifications-read, and agent plan/packet)
   GITHUB_TOKEN for non-interactive login bootstrap
   GITTENSOR_SCORE_PREVIEW_CMD
   GITTENSOR_ROOT
@@ -4443,7 +4545,7 @@ Use --profile <name> or LOOPOVER_PROFILE to run login, logout, whoami, status, d
 
 function parseOptions(args) {
   const options = {};
-  const repeatable = new Set(["label", "issue", "commit", "changedFile", "test", "testFile", "validation", "validationCommand", "validationStatus", "validationSummary", "validationDuration", "scenarioNote"]);
+  const repeatable = new Set(["label", "issue", "commit", "changedFile", "test", "testFile", "validation", "validationCommand", "validationStatus", "validationSummary", "validationDuration", "scenarioNote", "id"]);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--json") {
@@ -5533,6 +5635,14 @@ function getPrOutcomes(login, limit) {
   return apiGet(`/v1/contributors/${encodeURIComponent(login)}/pr-outcomes${suffix}`);
 }
 
+function getNotifications(login) {
+  return apiGet(`/v1/contributors/${encodeURIComponent(login)}/notifications`);
+}
+
+function markNotificationsRead(login, ids) {
+  return apiPost(`/v1/contributors/${encodeURIComponent(login)}/notifications/read`, ids ? { ids } : {});
+}
+
 // Mirror the API's own `summary` when it sends one, so the CLI and the loopover_monitor_open_prs MCP
 // tool (which returns monitor.summary verbatim) never drift into two different sentences for one payload.
 function openPrMonitorToolSummary(login, payload) {
@@ -5545,6 +5655,18 @@ function prOutcomesToolSummary(login, payload) {
   const summary = typeof payload?.summary === "string" ? payload.summary.trim() : "";
   if (summary) return summary;
   return `LoopOver post-merge outcomes for ${login}.`;
+}
+
+function notificationsToolSummary(login, payload) {
+  const summary = typeof payload?.summary === "string" ? payload.summary.trim() : "";
+  if (summary) return summary;
+  return `LoopOver notifications for ${login}.`;
+}
+
+function markNotificationsReadToolSummary(login, payload) {
+  const summary = typeof payload?.summary === "string" ? payload.summary.trim() : "";
+  if (summary) return summary;
+  return `Marked LoopOver notification(s) read for ${login}.`;
 }
 
 function isCacheableDecisionPack(payload, login) {

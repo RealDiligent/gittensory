@@ -25,6 +25,8 @@ import {
   ContributorDecisionPackSchema,
   ContributorOpenPrMonitorSchema,
   ContributorPrOutcomesSchema,
+  ContributorNotificationFeedSchema,
+  ContributorNotificationsMarkReadSchema,
   ContributorRewardRiskStrategySchema,
   ContributorProfileSchema,
   ContributorScoringProfileSchema,
@@ -789,6 +791,41 @@ export function buildOpenApiSpec() {
       200: {
         description: "Self-scoped post-merge outcome records with public-safe attribution (mirrors loopover_pr_outcome).",
         content: { "application/json": { schema: ContributorPrOutcomesSchema } },
+      },
+    },
+  });
+  registry.registerPath({
+    method: "get",
+    path: "/v1/contributors/{login}/notifications",
+    summary: "Contributor notification feed",
+    request: { params: z.object({ login: z.string() }) },
+    responses: {
+      200: {
+        description: "Self-scoped badge notification feed with unread count (mirrors loopover_list_notifications).",
+        content: { "application/json": { schema: ContributorNotificationFeedSchema } },
+      },
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/contributors/{login}/notifications/read",
+    summary: "Mark contributor notifications read",
+    request: {
+      params: z.object({ login: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              ids: z.array(z.string()).max(100).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Count of notifications marked read (mirrors loopover_mark_notifications_read).",
+        content: { "application/json": { schema: ContributorNotificationsMarkReadSchema } },
       },
     },
   });

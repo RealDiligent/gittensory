@@ -59,7 +59,6 @@ import {
   listIssues,
   deleteIssueWatchSubscription,
   listIssueWatchSubscriptionsForLogin,
-  listNotificationDeliveriesForRecipient,
   upsertIssueWatchSubscription,
   upsertRepositorySettings,
   listOpenPullRequests,
@@ -73,13 +72,12 @@ import {
   listRepositories,
   MAX_NOTIFICATION_DELIVERY_ID_LENGTH,
   MAX_NOTIFICATION_MARK_READ_IDS,
-  markNotificationDeliveriesRead,
   recordProductUsageEvent,
 } from "../db/repositories";
 import { decidePendingAgentAction } from "../services/agent-approval-queue";
 import { automationStateSummary, buildAutomationState } from "../services/automation-state";
 import { nowIso } from "../utils/json";
-import { buildNotificationFeed } from "../notifications/service";
+import { loadContributorNotificationFeed, markContributorNotificationsRead } from "../notifications/service";
 import { contributorRepoStatsFromGittensor, fetchGittensorContributorSnapshot } from "../gittensor/api";
 import { getRepositoryCollaboratorPermission } from "../github/app";
 import { performRepoDocRefresh } from "../github/repo-doc-refresh-runner";
@@ -3797,10 +3795,9 @@ export class LoopoverMcp {
 
   private async listNotifications(login: string): Promise<ToolPayload> {
     this.requireContributorAccess(login);
-    const deliveries = await listNotificationDeliveriesForRecipient(this.env, login, { channel: "badge", limit: 50 });
-    const feed = buildNotificationFeed(login, deliveries);
+    const feed = await loadContributorNotificationFeed(this.env, login);
     return {
-      summary: `LoopOver notifications for ${login}: ${feed.unreadCount} unread.`,
+      summary: feed.summary,
       data: feed as unknown as Record<string, unknown>,
     };
   }
@@ -3829,10 +3826,10 @@ export class LoopoverMcp {
 
   private async markNotificationsRead(login: string, ids?: string[]): Promise<ToolPayload> {
     this.requireContributorAccess(login);
-    const marked = await markNotificationDeliveriesRead(this.env, login, ids);
+    const payload = await markContributorNotificationsRead(this.env, login, ids);
     return {
-      summary: `Marked ${marked} LoopOver notification(s) read for ${login}.`,
-      data: { login: login.toLowerCase(), marked },
+      summary: payload.summary,
+      data: payload as unknown as Record<string, unknown>,
     };
   }
 

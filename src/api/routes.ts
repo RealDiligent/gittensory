@@ -107,6 +107,8 @@ import {
   upsertContributorEvidence,
   upsertContributorScoringProfile,
   upsertRepositorySettings,
+  MAX_NOTIFICATION_DELIVERY_ID_LENGTH,
+  MAX_NOTIFICATION_MARK_READ_IDS,
   getRepositoryAiKeyStatus,
   upsertRepositoryAiKey,
   deleteRepositoryAiKey,
@@ -271,6 +273,7 @@ import {
 import { attachDataQuality, buildCoreSignalFidelity, buildFreshnessSloReport, buildRepoDataQuality, buildSignalFidelity } from "../signals/data-quality";
 import { buildContributorOpenPrMonitor } from "../signals/contributor-open-pr-monitor";
 import { buildContributorPrOutcomes } from "../signals/contributor-pr-outcomes";
+import { loadContributorNotificationFeed, markContributorNotificationsRead } from "../notifications/service";
 import { buildPullRequestReviewability, type PullRequestReviewability } from "../signals/reward-risk";
 import { buildLocalBranchAnalysis, findCurrentBranchPullRequest } from "../signals/local-branch";
 import { buildIssueSlopAssessment, ISSUE_SLOP_RUBRIC_MARKDOWN } from "../signals/issue-slop";
@@ -581,6 +584,14 @@ const slopRiskSchema = z.object({
   commitMessages: z.array(z.string().max(2000)).max(200).optional(),
   hasLinkedIssue: z.boolean().optional(),
   issueDiscoveryLane: z.boolean().optional(),
+});
+
+// #6745: mirrors markNotificationsReadShape in src/mcp/server.ts (ids optional; omit = mark all).
+const markNotificationsReadBodySchema = z.object({
+  ids: z
+    .array(z.string().min(1).max(MAX_NOTIFICATION_DELIVERY_ID_LENGTH))
+    .max(MAX_NOTIFICATION_MARK_READ_IDS)
+    .optional(),
 });
 
 // #6748: mirrors checkImprovementPotentialShape in src/mcp/server.ts VERBATIM (same bounds, same optionality)
@@ -3341,6 +3352,24 @@ export function createApp() {
       limit = parsed;
     }
     return c.json(await buildContributorPrOutcomes(c.env, login, limit));
+  });
+
+  // #6745: REST mirrors of loopover_list_notifications / loopover_mark_notifications_read.
+  app.get("/v1/contributors/:login/notifications", async (c) => {
+    const login = c.req.param("login");
+    const unauthorized = await requireContributorAccess(c, login);
+    if (unauthorized) return unauthorized;
+    return c.json(await loadContributorNotificationFeed(c.env, login));
+  });
+
+  app.post("/v1/contributors/:login/notifications/read", async (c) => {
+    const login = c.req.param("login");
+    const unauthorized = await requireContributorAccess(c, login);
+    if (unauthorized) return unauthorized;
+    const body = await c.req.json().catch(() => null);
+    const parsed = markNotificationsReadBodySchema.safeParse(body ?? {});
+    if (!parsed.success) return c.json({ error: "invalid_mark_notifications_read", issues: parsed.error.issues }, 400);
+    return c.json(await markContributorNotificationsRead(c.env, login, parsed.data.ids));
   });
 
   app.get("/v1/contributors/:login/repos/:owner/:repo/decision", async (c) => {

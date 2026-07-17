@@ -177,6 +177,8 @@ export async function startFixtureServer(
     validateConfigWarnings?: string[];
     openPrMonitor?: Record<string, unknown>;
     prOutcomes?: Record<string, unknown>;
+    notifications?: Record<string, unknown>;
+    markNotificationsRead?: Record<string, unknown>;
     intakeStatus?: number;
     localBranchAnalysisStatus?: number;
     /** #6743: overrides the repo-doc refresh route's default "opened a new PR" response, e.g. to exercise
@@ -316,6 +318,19 @@ export async function startFixtureServer(
     if (prOutcomesMatch && request.method === "GET") {
       const login = decodeURIComponent(prOutcomesMatch[1]!);
       response.end(JSON.stringify({ ...prOutcomesFixture(login), ...(options.prOutcomes ?? {}) }));
+      return;
+    }
+    const notificationsMatch = request.url?.match(/^\/v1\/contributors\/([^/]+)\/notifications$/);
+    if (notificationsMatch && request.method === "GET") {
+      const login = decodeURIComponent(notificationsMatch[1]!);
+      response.end(JSON.stringify({ ...notificationsFixture(login), ...(options.notifications ?? {}) }));
+      return;
+    }
+    const notificationsReadMatch = request.url?.match(/^\/v1\/contributors\/([^/]+)\/notifications\/read$/);
+    if (notificationsReadMatch && request.method === "POST") {
+      const login = decodeURIComponent(notificationsReadMatch[1]!);
+      const body = (await readJsonRequest(request)) as { ids?: string[] };
+      response.end(JSON.stringify({ ...markNotificationsReadFixture(login, body?.ids), ...(options.markNotificationsRead ?? {}) }));
       return;
     }
     if (request.url === "/v1/contributors/JSONbored/repos/JSONbored/loopover/decision" && request.method === "GET") {
@@ -898,6 +913,37 @@ export function prOutcomesFixture(login = "JSONbored") {
         recordedAt: "2026-06-01T00:00:00.000Z",
       },
     ],
+  };
+}
+
+/** Mirrors GET /v1/contributors/:login/notifications / loadContributorNotificationFeed. */
+export function notificationsFixture(login = "JSONbored") {
+  return {
+    login: login.toLowerCase(),
+    unreadCount: 1,
+    summary: `LoopOver notifications for ${login}: 1 unread.`,
+    notifications: [
+      {
+        id: "n-1",
+        eventType: "pull_request_changes_requested",
+        repoFullName: "JSONbored/loopover",
+        pullNumber: 42,
+        title: "Changes requested on JSONbored/loopover#42",
+        body: "A reviewer requested changes on your pull request JSONbored/loopover#42.",
+        deeplink: "https://github.com/JSONbored/loopover/pull/42",
+        status: "delivered" as const,
+        createdAt: "2026-06-01T00:00:00.000Z",
+      },
+    ],
+  };
+}
+
+export function markNotificationsReadFixture(login = "JSONbored", ids?: string[]) {
+  const marked = ids?.length ? ids.length : 1;
+  return {
+    login: login.toLowerCase(),
+    marked,
+    summary: `Marked ${marked} LoopOver notification(s) read for ${login}.`,
   };
 }
 

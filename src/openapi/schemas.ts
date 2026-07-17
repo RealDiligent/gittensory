@@ -481,6 +481,35 @@ export const ContributorPrOutcomesSchema = z
   })
   .openapi("ContributorPrOutcomes");
 
+export const ContributorNotificationFeedSchema = z
+  .object({
+    login: z.string(),
+    unreadCount: z.number(),
+    summary: z.string(),
+    notifications: z.array(
+      z.object({
+        id: z.string(),
+        eventType: z.string(),
+        repoFullName: z.string(),
+        pullNumber: z.number().nullable(),
+        title: z.string(),
+        body: z.string(),
+        deeplink: z.string(),
+        status: z.enum(["delivered", "read"]),
+        createdAt: z.string(),
+      }),
+    ),
+  })
+  .openapi("ContributorNotificationFeed");
+
+export const ContributorNotificationsMarkReadSchema = z
+  .object({
+    login: z.string(),
+    marked: z.number(),
+    summary: z.string(),
+  })
+  .openapi("ContributorNotificationsMarkRead");
+
 export const ContributorOpportunitySchema = z
   .object({
     repoFullName: z.string(),

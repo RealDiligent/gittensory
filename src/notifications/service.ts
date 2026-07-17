@@ -5,7 +5,9 @@ import {
   getRepository,
   insertNotificationDeliveryIfAbsent,
   listIssueWatchersForRepo,
+  listNotificationDeliveriesForRecipient,
   listNotificationSubscriptionsForLogin,
+  markNotificationDeliveriesRead,
   markNotificationDeliveryDelivered,
 } from "../db/repositories";
 import { isGrabbableHighMultiplierIssue } from "../signals/engine";
@@ -185,6 +187,38 @@ export function buildNotificationFeed(login: string, deliveries: NotificationDel
     });
   }
   return { login: login.toLowerCase(), unreadCount, notifications };
+}
+
+export type ContributorNotificationFeed = NotificationFeed & { summary: string };
+
+export type ContributorNotificationsMarkRead = {
+  login: string;
+  marked: number;
+  summary: string;
+};
+
+/** #6745: shared payload for loopover_list_notifications + GET /v1/contributors/:login/notifications. */
+export async function loadContributorNotificationFeed(env: Env, login: string): Promise<ContributorNotificationFeed> {
+  const deliveries = await listNotificationDeliveriesForRecipient(env, login, { channel: "badge", limit: 50 });
+  const feed = buildNotificationFeed(login, deliveries);
+  return {
+    ...feed,
+    summary: `LoopOver notifications for ${login}: ${feed.unreadCount} unread.`,
+  };
+}
+
+/** #6745: shared payload for loopover_mark_notifications_read + POST .../notifications/read. */
+export async function markContributorNotificationsRead(
+  env: Env,
+  login: string,
+  ids?: string[],
+): Promise<ContributorNotificationsMarkRead> {
+  const marked = await markNotificationDeliveriesRead(env, login, ids);
+  return {
+    login: login.toLowerCase(),
+    marked,
+    summary: `Marked ${marked} LoopOver notification(s) read for ${login}.`,
+  };
 }
 
 // Badge delivery is pull-based: "delivering" just makes the row visible to the recipient's feed (status
