@@ -105,7 +105,8 @@ describe("PublicRepoQualityPage (#6821)", () => {
     renderWithClient(<PublicRepoQualityPage owner="JSONbored" repo="loopover" />);
 
     await waitFor(() => expect(screen.getByText("Gate precision")).toBeTruthy());
-    expect(screen.getByText("Merge ratio")).toBeTruthy();
+    // "Merge ratio" appears on both the stat card and the trend table header.
+    expect(screen.getAllByText("Merge ratio").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Slop calibration")).toBeTruthy();
     expect(screen.getByText("Weekly trend")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
