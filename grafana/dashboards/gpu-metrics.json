@@ -95,7 +95,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum by (provider, request_kind) (rate(loopover_ai_provider_request_duration_seconds_count[5m]))",
+          "expr": "sum by (provider, request_kind) ((rate(loopover_ai_provider_request_duration_seconds_count[5m]) or rate(gittensory_ai_provider_request_duration_seconds_count[5m])))",
           "legendFormat": "{{provider}} / {{request_kind}}",
           "refId": "A"
         }
@@ -110,9 +110,9 @@
       "title": "AI Request Latency (p50 / p95 / p99)",
       "type": "timeseries",
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.50, sum by (le) (rate(loopover_ai_provider_request_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.95, sum by (le) (rate(loopover_ai_provider_request_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.99, sum by (le) (rate(loopover_ai_provider_request_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.50, sum by (le) ((rate(loopover_ai_provider_request_duration_seconds_bucket[5m]) or rate(gittensory_ai_provider_request_duration_seconds_bucket[5m]))))", "legendFormat": "p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.95, sum by (le) ((rate(loopover_ai_provider_request_duration_seconds_bucket[5m]) or rate(gittensory_ai_provider_request_duration_seconds_bucket[5m]))))", "legendFormat": "p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" }, "expr": "histogram_quantile(0.99, sum by (le) ((rate(loopover_ai_provider_request_duration_seconds_bucket[5m]) or rate(gittensory_ai_provider_request_duration_seconds_bucket[5m]))))", "legendFormat": "p99", "refId": "C" }
       ]
     },
     {
@@ -127,7 +127,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "expr": "sum by (provider, request_kind) (rate(loopover_ai_provider_request_errors_total[5m]))",
+          "expr": "sum by (provider, request_kind) ((rate(loopover_ai_provider_request_errors_total[5m]) or rate(gittensory_ai_provider_request_errors_total[5m])))",
           "legendFormat": "{{provider}} / {{request_kind}}",
           "refId": "A"
         }
