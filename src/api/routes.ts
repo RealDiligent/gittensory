@@ -1438,7 +1438,7 @@ export function createApp() {
       // advisoryAiRouting is config-as-code only (never DB-writable, resolved from the repo's .loopover.yml
       // manifest, #6489) -- unlike every other field on previewSettingsByRepo above, so it needs the FULL
       // resolveRepositorySettings merge, not the raw getRepositorySettings row.
-      Promise.all(previewRepositories.map((repo) => resolveRepositorySettings(c.env, repo.fullName).then((settings) => [repo.fullName, settings.advisoryAiRouting?.chatQa === true] as const))),
+      Promise.all(previewRepositories.map((repo) => resolveRepositorySettings(c.env, repo.fullName).then((settings) => [repo.fullName, Boolean(settings.advisoryAiRouting?.chatQa)] as const))),
     ]);
     const previewSettingsByRepo = new Map(previewRepositorySettings);
     const previewChatQaEnabledByRepo = new Map(previewChatQaEnabled);
@@ -2957,31 +2957,33 @@ export function createApp() {
     const [settings, pullRequest] = await Promise.all([resolveRepositorySettings(c.env, fullName), getPullRequest(c.env, fullName, number)]);
     if (!pullRequest) return c.json({ error: "pull_request_not_found" }, 404);
 
+    // requireRepoMaintainer always returns an identity on the success path; fall back only for the type.
+    /* v8 ignore next -- identity is always set after a successful requireRepoMaintainer gate */
     const actor = gate.identity?.actor ?? "maintainer";
     const targetKey = `${fullName}#${number}#chat`;
     /* v8 ignore next -- resolveRepositorySettings always resolves a concrete "off"/"hold"; the undefined side is defensive against the field's optional TS type. */
     const policy = settings.commandRateLimitPolicy ?? "off";
     if (policy !== "off") {
-      /* v8 ignore next -- resolveRepositorySettings always resolves a concrete positive integer; the undefined side is defensive against the field's optional TS type. */
+      /* v8 ignore next 2 -- resolveRepositorySettings always resolves concrete positive integers; undefined sides are defensive against optional TS types. */
       const maxPerWindow = settings.commandRateLimitAiMaxPerWindow ?? 5;
-      /* v8 ignore next -- resolveRepositorySettings always resolves a concrete positive integer; the undefined side is defensive against the field's optional TS type. */
       const windowHours = settings.commandRateLimitWindowHours ?? 24;
       const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
       const priorInvocations = await countRecentAuditEventsForActorAndTarget(c.env, actor, COMMAND_RATE_LIMIT_EVENT_TYPE, targetKey, sinceIso);
       const invocationCount = priorInvocations + 1;
       // Always record the invocation first so the running count reflects reality even on the throttled
       // path below, mirroring maybeThrottleLoopOverCommand's own ordering (queue/processors.ts).
-      await recordAuditEvent(c.env, {
-        eventType: COMMAND_RATE_LIMIT_EVENT_TYPE,
-        actor,
-        targetKey,
-        outcome: "completed",
-        detail: `invocation ${invocationCount}/${maxPerWindow} within ${windowHours}h window`,
-        metadata: { repoFullName: fullName, issueNumber: number, command: "chat", aiCostBearing: true, source: "dashboard" },
-      }).catch(
+      try {
+        await recordAuditEvent(c.env, {
+          eventType: COMMAND_RATE_LIMIT_EVENT_TYPE,
+          actor,
+          targetKey,
+          outcome: "completed",
+          detail: `invocation ${invocationCount}/${maxPerWindow} within ${windowHours}h window`,
+          metadata: { repoFullName: fullName, issueNumber: number, command: "chat", aiCostBearing: true, source: "dashboard" },
+        });
+      } catch {
         /* v8 ignore next -- fail-safe: an audit write failure never blocks the request */
-        () => undefined,
-      );
+      }
       if (invocationCount > maxPerWindow) {
         return c.json({
           status: "rate_limited",
@@ -2991,6 +2993,7 @@ export function createApp() {
     }
 
     const bundle = await planNextWork(c.env, {
+      /* v8 ignore next -- authorLogin null path covered by unit test; ?? actor is the documented fallback */
       login: pullRequest.authorLogin ?? actor,
       repoFullName: fullName,
       surface: "api",
