@@ -3921,7 +3921,20 @@ async function loginWithDeviceFlow() {
   let intervalMs = Math.max(5, Number(start.interval ?? 5)) * 1000;
   while (Date.now() < deadline) {
     await sleep(intervalMs);
-    const result = await apiFetch("/v1/auth/github/device/poll", { method: "POST", body: JSON.stringify({ deviceCode: start.deviceCode }) }, { auth: false });
+    let result;
+    try {
+      result = await apiFetch("/v1/auth/github/device/poll", { method: "POST", body: JSON.stringify({ deviceCode: start.deviceCode }) }, { auth: false });
+    } catch (error) {
+      // A transient 429 from our own rate limiter (#6792) is not a GitHub-reported device-flow status --
+      // back off using the server's Retry-After and keep polling within the deadline, the same posture
+      // already applied to GitHub's own "slow_down" status below, instead of aborting the whole attempt.
+      if (error?.status === 429) {
+        const retryAfterSeconds = Number(/retry-after=(\d+)s/.exec(error.message)?.[1]);
+        intervalMs = Math.max(intervalMs, (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 5) * 1000);
+        continue;
+      }
+      throw error;
+    }
     if (result.token) return result;
     if (result.status === "slow_down") intervalMs += 5000;
     if (result.status && result.status !== "authorization_pending" && result.status !== "slow_down") throw new Error(`GitHub OAuth failed: ${result.status}`);

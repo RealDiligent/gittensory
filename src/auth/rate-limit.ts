@@ -122,6 +122,13 @@ export function routeClassForPath(path: string): RateLimitClass {
   // self-host instances. Strict (10/min per IP) caps abuse — legitimate instances export hourly.
   if (path === "/v1/orb/ingest") return "strict";
   if (path === "/v1/auth/session" || path === "/v1/auth/logout") return "normal";
+  // GitHub's OAuth Device Authorization Grant (RFC 8628) is polling-by-design: a client polls
+  // /device/poll at a server-specified interval (this repo's own default is 5s) for up to the device
+  // code's full expiry window (900s / 15 minutes here) -- normal human completion time alone can
+  // exceed the blanket strict class's 10-req/60s budget well before the code even expires (#6792).
+  // /device/start shares the same generous class since a retried/failed start attempt shouldn't eat
+  // into the same tight budget a poll loop needs.
+  if (path === "/v1/auth/github/device/poll" || path === "/v1/auth/github/device/start") return "normal";
   if (path.startsWith("/v1/auth/")) return "strict";
   if (path === "/loopover/shot") return "expensive";
   if (

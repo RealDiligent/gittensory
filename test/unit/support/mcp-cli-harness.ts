@@ -156,8 +156,14 @@ export async function startFixtureServer(
     openPrMonitor?: Record<string, unknown>;
     intakeStatus?: number;
     localBranchAnalysisStatus?: number;
+    /** #6792: queued /v1/auth/github/device/poll responses, consumed one per request -- the last entry
+     *  repeats once exhausted. Lets a test simulate a transient 429 (or GitHub's own slow_down/pending
+     *  statuses) before the device flow eventually resolves. Requires deviceFlowStart to be set too. */
+    deviceFlowStart?: { deviceCode: string; userCode: string; verificationUri: string; expiresIn?: number; interval?: number };
+    deviceFlowPollResponses?: Array<{ status?: number; retryAfterSeconds?: number; body: unknown }>;
   } = {},
 ) {
+  let deviceFlowPollCallCount = 0;
   server = createServer(async (request, response) => {
     options.onApiRequest?.(request);
     response.setHeader("content-type", "application/json");
@@ -232,6 +238,21 @@ export async function startFixtureServer(
     }
     if (request.url === "/v1/auth/logout" && request.method === "POST") {
       response.end(JSON.stringify({ status: "logged_out" }));
+      return;
+    }
+    if (request.url === "/v1/auth/github/device/start" && request.method === "POST" && options.deviceFlowStart) {
+      const start = options.deviceFlowStart;
+      response.end(JSON.stringify({ status: "pending", deviceCode: start.deviceCode, userCode: start.userCode, verificationUri: start.verificationUri, expiresIn: start.expiresIn ?? 900, interval: start.interval ?? 5 }));
+      return;
+    }
+    if (request.url === "/v1/auth/github/device/poll" && request.method === "POST" && options.deviceFlowPollResponses) {
+      await readJsonRequest(request);
+      const responses = options.deviceFlowPollResponses;
+      const next = responses[Math.min(deviceFlowPollCallCount, responses.length - 1)];
+      deviceFlowPollCallCount += 1;
+      response.statusCode = next?.status ?? 200;
+      if (next?.retryAfterSeconds !== undefined) response.setHeader("retry-after", String(next.retryAfterSeconds));
+      response.end(JSON.stringify(next?.body ?? {}));
       return;
     }
     if (request.url === "/v1/contributors/JSONbored/decision-pack" && request.method === "GET") {

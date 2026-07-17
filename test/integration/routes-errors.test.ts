@@ -466,9 +466,11 @@ describe("api route guards and error branches", () => {
     expect(noOriginPreflight.headers.get("access-control-allow-origin")).toBeNull();
 
     const limitedEnv = createTestEnv({ RATE_LIMITER: denyAllRateLimiter() as unknown as DurableObjectNamespace });
+    // #6792: device/start (and device/poll) get the "normal" class, not the blanket /v1/auth/* strict
+    // one -- a spec-compliant device-flow poller needs a budget sized for its own polling cadence.
     const limited = await app.request("/v1/auth/github/device/start", { method: "POST" }, limitedEnv);
     expect(limited.status).toBe(429);
-    await expect(limited.json()).resolves.toMatchObject({ error: "rate_limited", routeClass: "strict" });
+    await expect(limited.json()).resolves.toMatchObject({ error: "rate_limited", routeClass: "normal" });
     expect((await app.request("/v1/repos", { headers: apiHeaders(limitedEnv) }, limitedEnv)).status).toBe(429);
 
     const allowedRateEnv = createTestEnv({ RATE_LIMITER: allowRateLimiter() as unknown as DurableObjectNamespace });

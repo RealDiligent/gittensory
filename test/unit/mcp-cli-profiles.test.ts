@@ -227,4 +227,25 @@ describe("loopover-mcp CLI — profiles", () => {
     expect(telemetryHeaders).not.toContain("session-token");
     expect(telemetryHeaders).not.toContain(tempDir);
   });
+
+  it("#6792: loginWithDeviceFlow backs off and keeps polling through a transient 429 from our own rate limiter instead of aborting", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "loopover-cli-"));
+    const url = await startFixtureServer({
+      deviceFlowStart: { deviceCode: "device-code-1", userCode: "ABCD-1234", verificationUri: "https://github.com/login/device", interval: 0 },
+      deviceFlowPollResponses: [
+        { status: 429, retryAfterSeconds: 1, body: { error: "rate_limited", routeClass: "normal" } },
+        { body: { token: "device-session-token", login: "JSONbored", expiresAt: "2026-06-02T00:00:00.000Z", scopes: ["repo"] } },
+      ],
+    });
+
+    const login = JSON.parse(
+      await runAsync(["login", "--json"], {
+        LOOPOVER_API_URL: url,
+        LOOPOVER_CONFIG_DIR: tempDir,
+        LOOPOVER_SKIP_NPM_VERSION_CHECK: "true",
+      }),
+    ) as { status: string; login: string };
+
+    expect(login).toMatchObject({ status: "authenticated", login: "JSONbored" });
+  }, 20000);
 });

@@ -112,7 +112,11 @@ describe("private-beta auth and rate limiting", () => {
   it("classifies rate-limit route costs", () => {
     expect(routeClassForPath("/v1/github/webhook")).toBe("strict");
     expect(routeClassForPath("/v1/orb/ingest")).toBe("strict"); // open telemetry ingest — abuse-capped per IP
-    expect(routeClassForPath("/v1/auth/github/device/start")).toBe("strict");
+    // #6792: device-flow start/poll get the same generous "normal" budget as /v1/auth/session and
+    // /v1/auth/logout, not the blanket /v1/auth/* strict class — a spec-compliant poller (RFC 8628)
+    // exhausts a 10-req/60s budget well within a human's normal completion time otherwise.
+    expect(routeClassForPath("/v1/auth/github/device/start")).toBe("normal");
+    expect(routeClassForPath("/v1/auth/github/device/poll")).toBe("normal");
     expect(routeClassForPath("/v1/auth/github/token")).toBe("strict"); // #6117: same strict cap as the rest of /v1/auth/*
     expect(routeClassForPath("/v1/local/branch-analysis")).toBe("expensive");
     expect(routeClassForPath("/loopover/shot")).toBe("expensive");
