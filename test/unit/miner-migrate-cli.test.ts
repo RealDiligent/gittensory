@@ -7,6 +7,7 @@ import { runMigrate, runMigrateChecks } from "../../packages/loopover-miner/lib/
 import { initPortfolioQueueStore, resolvePortfolioQueueDbPath } from "../../packages/loopover-miner/lib/portfolio-queue.js";
 import { resolveEventLedgerDbPath } from "../../packages/loopover-miner/lib/event-ledger.js";
 import { applySchemaMigrations, BASELINE_SCHEMA_VERSION } from "../../packages/loopover-miner/lib/schema-version.js";
+import { openWorktreeAllocator, resolveWorktreeAllocatorDbPath } from "../../packages/loopover-miner/lib/worktree-allocator.js";
 
 const roots: string[] = [];
 
@@ -24,6 +25,10 @@ const STORE_NAMES = [
   "claim-ledger",
   "run-state",
   "plan-store",
+  "governor-state",
+  "attempt-log",
+  "replay-snapshot",
+  "worktree-allocator",
 ];
 
 afterEach(() => {
@@ -32,11 +37,13 @@ afterEach(() => {
 });
 
 describe("loopover-miner migrate (#4871)", () => {
-  it("covers the exact same seven stores doctor's store-integrity sweep covers, in the same order, and skips every one when nothing has been created yet", () => {
+  it("covers the exact same eleven stores doctor's store-integrity sweep covers, in the same order, and skips every one when nothing has been created yet", () => {
     const env = tempEnv();
     const results = runMigrateChecks(env);
 
     expect(results.map((result) => result.name)).toEqual(STORE_NAMES);
+    // REGRESSION (#6768): these four durable stores were previously omitted from both migrate and doctor.
+    expect(STORE_NAMES).toEqual(expect.arrayContaining(["governor-state", "attempt-log", "replay-snapshot", "worktree-allocator"]));
     for (const result of results) {
       expect(result.ok).toBe(true);
       expect(result.status).toBe("skipped");
@@ -60,6 +67,19 @@ describe("loopover-miner migrate (#4871)", () => {
     expect(portfolioQueue?.ok).toBe(true);
     expect(portfolioQueue?.versionBefore).toBe(portfolioQueue?.versionAfter);
     expect(portfolioQueue?.versionBefore).toBeGreaterThan(0);
+  });
+
+  it("REGRESSION (#6768): opens worktree-allocator through migrate's open adapter", () => {
+    // worktree-allocator's STORES entry is `(dbPath) => openWorktreeAllocator({ dbPath })` — a one-line
+    // adapter that only executes when an on-disk file exists. Skip-only sweeps leave that line at 0% patch
+    // coverage; seeding + migrating it proves the adapter runs.
+    const env = tempEnv();
+    openWorktreeAllocator({ dbPath: resolveWorktreeAllocatorDbPath(env) }).close();
+
+    const row = runMigrateChecks(env).find((result) => result.name === "worktree-allocator");
+    expect(row).toMatchObject({ ok: true, status: "up-to-date" });
+    expect(row?.versionBefore).toBe(row?.versionAfter);
+    expect(row?.versionBefore).toEqual(expect.any(Number));
   });
 
   it("actually migrates a pre-existing older-schema portfolio-queue file, bumping its stamped version and adding the missing column", () => {
