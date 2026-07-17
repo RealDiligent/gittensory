@@ -20,28 +20,39 @@ function checkRun(name: string, status: string, conclusion: string | null = null
   };
 }
 
-// Three transient-failure modes the existing miner-ci-poller.test.ts (#2323) does not exercise (#4281). Because
-// pollCheckRuns' attempt loop (ci-poller.js:200-225) wraps NO try/catch around fetchHeadSha/fetchCheckRuns, a single
-// thrown error on attempt 1 aborts the whole poll immediately — it does not consume a backoff attempt and retry.
-// These pin that current behavior (no silent retry, no swallow, no hang) rather than changing it; if the poll should
-// instead retry on a 429, that is a separate feat/fix, deliberately not done here under a test-prefixed change.
-describe("miner CI poller transient-failure modes (#4281)", () => {
-  it.each([403, 429])(
-    "propagates a %d response as github_<status> and does NOT retry through the remaining attempts",
-    async (status) => {
-      const sleepFn = vi.fn(async () => {});
-      const fetchFn = vi.fn(async () => jsonResponse({ message: "API rate limit exceeded" }, { status }));
+// Transient-failure modes the happy-path miner-ci-poller.test.ts (#2323) does not exercise (#4281). pollCheckRuns'
+// attempt loop wraps NO try/catch around fetchHeadSha/fetchCheckRuns, so a THROWN error on attempt 1 aborts the
+// whole poll immediately. #6761 refined the RESPONSE side: fetchWithRetry now rides out a transient RATE-LIMIT
+// response (429, or a secondary-rate-limit 403 with a Retry-After / x-ratelimit-remaining: 0 header) within its
+// bounded budget, but a PLAIN permission 403 (no rate-limit signal) is still not retried, and a thrown network
+// error still propagates unretried. These pin those distinctions.
+describe("miner CI poller transient-failure modes (#4281, #6761)", () => {
+  it("propagates a plain permission 403 (no rate-limit headers) as github_403 without retrying", async () => {
+    const sleepFn = vi.fn(async () => {});
+    const fetchFn = vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration" }, { status: 403 }));
 
-      await expect(
-        pollCheckRuns("acme/widgets", 42, { apiBaseUrl: API, githubToken: "t", fetchFn, sleepFn, maxAttempts: 5 }),
-      ).rejects.toMatchObject({ code: `github_${status}` });
+    await expect(
+      pollCheckRuns("acme/widgets", 42, { apiBaseUrl: API, githubToken: "t", fetchFn, sleepFn, maxAttempts: 5 }),
+    ).rejects.toMatchObject({ code: "github_403" });
 
-      // The error surfaces on attempt 1's first request (the PR head-SHA fetch) and aborts the poll: no backoff
-      // sleep is consumed and none of the remaining four attempts run.
-      expect(fetchFn).toHaveBeenCalledTimes(1);
-      expect(sleepFn).not.toHaveBeenCalled();
-    },
-  );
+    // Not a rate limit → not retried: the error surfaces on the very first (PR head-SHA) request and aborts the poll.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(sleepFn).not.toHaveBeenCalled();
+  });
+
+  it("retries a persistent 429 within fetchWithRetry's bounded budget, then surfaces github_429 (#6761)", async () => {
+    const sleepFn = vi.fn(async () => {});
+    const fetchFn = vi.fn(async () => jsonResponse({ message: "API rate limit exceeded" }, { status: 429 }));
+
+    await expect(
+      pollCheckRuns("acme/widgets", 42, { apiBaseUrl: API, githubToken: "t", fetchFn, sleepFn, maxAttempts: 5 }),
+    ).rejects.toMatchObject({ code: "github_429" });
+
+    // The head-SHA fetch's fetchWithRetry now exhausts its default 3 attempts (2 backoff sleeps) on the persistent
+    // 429 before the still-429 surfaces — a single transient spike would instead have been ridden out to success.
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(sleepFn).toHaveBeenCalledTimes(2);
+  });
 
   it("propagates a fetchFn promise rejection (network timeout) during the PR head-SHA fetch", async () => {
     const sleepFn = vi.fn(async () => {});

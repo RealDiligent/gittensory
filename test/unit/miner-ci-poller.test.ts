@@ -90,6 +90,28 @@ describe("miner CI check-run poller (#2323)", () => {
     expect(result.conclusion).toBe("success"); // the poll completed despite the transient 5xx
   });
 
+  it("retries a transient 429 rate-limit from GitHub during the poll and completes (#6761)", async () => {
+    let checkRunsAttempts = 0;
+    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/repos/acme/widgets/pulls/42")) return prResponse("head-sha");
+      if (url.includes("/check-runs")) {
+        checkRunsAttempts += 1;
+        if (checkRunsAttempts === 1) return jsonResponse({ message: "API rate limit exceeded" }, { status: 429 }); // a transient rate limit
+        return checksResponse([checkRun("validate", "completed", "success")]);
+      }
+      return jsonResponse({}, { status: 404 });
+    });
+    const result = await pollCheckRuns("acme/widgets", 42, {
+      apiBaseUrl: API,
+      githubToken: "github-token",
+      fetchFn,
+      sleepFn: () => Promise.resolve(), // no real backoff delay in the test
+    });
+    expect(checkRunsAttempts).toBe(2); // the 429 was retried within the bounded budget, then succeeded
+    expect(result.conclusion).toBe("success"); // the poll completed instead of aborting on the rate limit
+  });
+
   it("rejects untrusted apiBaseUrl values before any token-bearing request", async () => {
     const fetchFn = vi.fn();
     for (const apiBaseUrl of [

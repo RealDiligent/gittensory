@@ -47,6 +47,24 @@ describe("PR disposition poller (#5135)", () => {
     expect(result).toMatchObject({ state: "closed", merged: true });
   });
 
+  it("retries a transient 429 rate-limit from the GitHub API during a poll and completes (#6761)", async () => {
+    let attempts = 0;
+    const fetchFn = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) return jsonResponse({ message: "API rate limit exceeded" }, { status: 429 }); // a transient rate limit
+      return prResponse({ state: "closed", merged: true, closed_at: "2026-07-12T00:00:00Z" });
+    });
+
+    const result = await pollPrDisposition("acme/widgets", 42, {
+      apiBaseUrl: API,
+      fetchFn,
+      sleepFn: async () => {}, // keep the per-call retry backoff instant
+    });
+
+    expect(attempts).toBe(2); // the 429 was retried, then succeeded — not surfaced as an immediate failure
+    expect(result).toMatchObject({ state: "closed", merged: true });
+  });
+
   it("returns terminal merged disposition immediately, without further polling", async () => {
     const fetchFn = vi.fn(async () =>
       prResponse({ state: "closed", merged: true, closed_at: "2026-07-12T00:00:00Z" }),

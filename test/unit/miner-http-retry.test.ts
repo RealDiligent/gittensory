@@ -83,6 +83,85 @@ describe("fetchWithRetry (#4829)", () => {
   });
 });
 
+/** A response with case-insensitive header lookup, mirroring a real `Headers` object's `.get()`. */
+function resp(status: number, headers: Record<string, string> = {}) {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+  return { status, headers: { get: (name: string) => (name.toLowerCase() in lower ? lower[name.toLowerCase()] : null) } };
+}
+
+/** A fetchFn driven by a scripted list of response objects (the last one repeats). */
+function seqFetch(responses: Array<ReturnType<typeof resp>>) {
+  let call = 0;
+  return async (_url?: unknown, _init?: unknown) => responses[Math.min(call++, responses.length - 1)]!;
+}
+
+describe("fetchWithRetry rate-limit retry (#6761)", () => {
+  it("retries a 429 (primary rate limit) and returns the eventual success", async () => {
+    const f = seqFetch([resp(429), resp(200)]);
+    const res = await fetchWithRetry(f, "u", undefined, { maxAttempts: 3, sleepFn: noSleep });
+    expect(res.status).toBe(200);
+  });
+
+  it("retries a secondary-rate-limit 403 (Retry-After header present)", async () => {
+    const f = seqFetch([resp(403, { "retry-after": "1" }), resp(200)]);
+    const res = await fetchWithRetry(f, "u", undefined, { maxAttempts: 3, sleepFn: noSleep });
+    expect(res.status).toBe(200);
+  });
+
+  it("retries a primary-rate-limit 403 (x-ratelimit-remaining: 0)", async () => {
+    const f = seqFetch([resp(403, { "x-ratelimit-remaining": "0" }), resp(200)]);
+    const res = await fetchWithRetry(f, "u", undefined, { maxAttempts: 3, sleepFn: noSleep });
+    expect(res.status).toBe(200);
+  });
+
+  it("does NOT retry a plain permission 403 (no rate-limit signal) — returns it immediately", async () => {
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return resp(403, { "x-ratelimit-remaining": "4999" });
+    };
+    const res = await fetchWithRetry(f, "u", undefined, { maxAttempts: 3, sleepFn: noSleep });
+    expect(res.status).toBe(403);
+    expect(calls).toBe(1);
+  });
+
+  it("does NOT retry a 403 with no headers at all (defensive header read)", async () => {
+    let calls = 0;
+    const f = async () => {
+      calls += 1;
+      return { status: 403 }; // no `headers` property
+    };
+    const res = await fetchWithRetry(f, "u", undefined, { maxAttempts: 3, sleepFn: noSleep });
+    expect(res.status).toBe(403);
+    expect(calls).toBe(1);
+  });
+
+  it("honors Retry-After (delta-seconds), never below the backoff, and caps at MAX_BACKOFF_MS", async () => {
+    const delays: number[] = [];
+    const sleepFn = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    // attempt 1: Retry-After 2s > backoff 500 → 2000ms; attempt 2: Retry-After 3600s → capped to 10_000ms.
+    const f = seqFetch([resp(429, { "retry-after": "2" }), resp(429, { "retry-after": "3600" }), resp(200)]);
+    await fetchWithRetry(f, "u", undefined, { maxAttempts: 5, sleepFn, backoffMs: () => 500 });
+    expect(delays).toEqual([2000, 10_000]);
+  });
+
+  it("falls back to the exponential backoff when Retry-After is smaller, zero, or non-numeric", async () => {
+    const delays: number[] = [];
+    const sleepFn = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    // Retry-After "0" → max(800, 0) = 800; "nope" → NaN → backoff 800.
+    const f = seqFetch([resp(429, { "retry-after": "0" }), resp(429, { "retry-after": "nope" }), resp(200)]);
+    await fetchWithRetry(f, "u", undefined, { maxAttempts: 5, sleepFn, backoffMs: () => 800 });
+    expect(delays).toEqual([800, 800]);
+  });
+});
+
 describe("fetchWithRetry timeoutMs (#miner-github-read-timeouts)", () => {
   it("does not inject a signal when timeoutMs is absent (undefined)", async () => {
     const f = scriptedFetch([200]);
