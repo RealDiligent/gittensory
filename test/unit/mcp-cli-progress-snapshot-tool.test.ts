@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildProgressSnapshot } from "../../src/loop-progress";
+import { buildProgressSnapshot, type LoopProgressState } from "../../src/loop-progress";
 
 // #6753: the local mirror of loopover_build_progress_snapshot. Like its same-tier sibling
 // loopover_check_slop_risk, it computes IN-PROCESS from @loopover/engine — no API round-trip — so
@@ -48,7 +48,7 @@ describe("loopover_build_progress_snapshot stdio mirror (#6753)", () => {
   });
 
   it("matches the pure builder for representative states — offline, with no API reachable", async () => {
-    const cases = [
+    const cases: LoopProgressState[] = [
       { iteration: 0, phase: "queued", status: "running" },
       { iteration: 2, maxIterations: 5, phase: "coding", status: "running" },
       { iteration: 5, maxIterations: 5, phase: "done", status: "converged" },
@@ -60,7 +60,7 @@ describe("loopover_build_progress_snapshot stdio mirror (#6753)", () => {
         status: "abandoned",
         recentActivity: [{ step: "plan" }, { step: "code", detail: "wrote tests", at: "2026-07-17T00:00:00.000Z" }],
       },
-    ] as const;
+    ];
     for (const args of cases) {
       const result = await client.callTool({ name: "loopover_build_progress_snapshot", arguments: args });
       expect(result.isError, JSON.stringify(args)).toBeFalsy();

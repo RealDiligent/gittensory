@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/api/routes";
-import { buildProgressSnapshot } from "../../src/loop-progress";
+import { buildProgressSnapshot, type LoopProgressState } from "../../src/loop-progress";
 import { createTestEnv } from "../helpers/d1";
 
 // #6753: POST /v1/loop/progress-snapshot — the REST mirror bringing loopover_build_progress_snapshot to the
@@ -22,7 +22,7 @@ describe("POST /v1/loop/progress-snapshot (#6753)", () => {
       phase: "coding",
       status: "running",
       recentActivity: [{ step: "edit", detail: "touched routes.ts" }],
-    };
+    } satisfies LoopProgressState;
     const response = await post(env, body);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -37,7 +37,7 @@ describe("POST /v1/loop/progress-snapshot (#6753)", () => {
 
   it("matches the pure builder for every representative state — parity with the MCP tool", async () => {
     const env = createTestEnv();
-    const cases = [
+    const cases: LoopProgressState[] = [
       { iteration: 0, phase: "queued", status: "running" },
       { iteration: 1, maxIterations: 4, phase: "claiming", status: "running" },
       { iteration: 3, maxIterations: 3, phase: "done", status: "converged" },
@@ -52,7 +52,7 @@ describe("POST /v1/loop/progress-snapshot (#6753)", () => {
           { step: "code", detail: "wrote tests" },
         ],
       },
-    ] as const;
+    ];
     for (const body of cases) {
       const response = await post(env, body);
       expect(response.status, JSON.stringify(body)).toBe(200);
