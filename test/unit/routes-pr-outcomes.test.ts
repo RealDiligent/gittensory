@@ -64,6 +64,19 @@ describe("GET /v1/contributors/:login/pr-outcomes (#6747)", () => {
     expect(notInt.status).toBe(400);
   });
 
+  it("returns an empty outcomes list when the contributor has no merged-PR deliveries", async () => {
+    const app = createApp();
+    const env = createTestEnv();
+    const response = await app.request("/v1/contributors/miner/pr-outcomes", { headers: apiHeaders(env) }, env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      login: "miner",
+      count: 0,
+      summary: "LoopOver post-merge outcomes for miner: 0 merged PR(s).",
+      outcomes: [],
+    });
+  });
+
   it("rejects unauthenticated callers", async () => {
     const app = createApp();
     const env = createTestEnv();

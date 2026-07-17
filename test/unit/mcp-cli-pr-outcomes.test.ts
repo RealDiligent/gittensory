@@ -124,6 +124,26 @@ describe("loopover-mcp pr-outcomes CLI (#6747)", () => {
     });
     expect(badLimit.status).toBe(1);
     expect(`${badLimit.stdout}${badLimit.stderr}`).toMatch(/integer between 1 and 100/);
+
+    const bareLimit = runExpectingFailure(["pr-outcomes", "--login", "JSONbored", "--limit", "101"], {
+      LOOPOVER_API_URL: apiUrl,
+      LOOPOVER_TOKEN: "session-token",
+    });
+    expect(bareLimit.status).toBe(1);
+  });
+
+  it("falls back when the API omits summary and prints null pull numbers / empty attributions", async () => {
+    await closeFixtureServer();
+    const sparseUrl = await startFixtureServer({
+      prOutcomes: {
+        summary: "   ",
+        outcomes: [{ repoFullName: "a/b", pullNumber: null, outcome: "merged", attribution: "", deeplink: "https://x", recordedAt: "t" }],
+      },
+    });
+    const env = { LOOPOVER_API_URL: sparseUrl, LOOPOVER_TOKEN: "session-token" };
+    const plain = await runAsync(["pr-outcomes", "--login", "JSONbored"], env);
+    expect(plain).toContain("LoopOver post-merge outcomes for JSONbored.");
+    expect(plain).toContain("a/b#? [merged]");
   });
 
   it("strips ANSI escapes from API-chosen text on the plain-text path but not from --json", async () => {
@@ -140,6 +160,15 @@ describe("loopover-mcp pr-outcomes CLI (#6747)", () => {
 
     const asJson = await runAsync(["pr-outcomes", "--login", "JSONbored", "--json"], env);
     expect(JSON.parse(asJson).summary).toBe("\u001b[31mFAKE PASS\u001b[0m");
+  });
+
+  it("ignores a bare --limit flag (no value) and still returns outcomes", async () => {
+    const out = await runAsync(["pr-outcomes", "--login", "JSONbored", "--limit", "--json"], {
+      LOOPOVER_API_URL: apiUrl,
+      LOOPOVER_TOKEN: "session-token",
+    });
+    expect(JSON.parse(out)).toEqual(prOutcomesFixture());
+    expect(capturedRequests.at(-1)?.url).not.toContain("limit=");
   });
 
   it("documents itself in --help and in the shell-completion command list", () => {
