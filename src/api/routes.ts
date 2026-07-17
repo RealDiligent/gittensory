@@ -200,9 +200,11 @@ import {
 import {
   buildStaticControlPanelRoleSummary,
   canLoginAccessRepo,
+  canWatchRepo,
   loadControlPanelAccessScope,
   loadControlPanelRoleSummary,
 } from "../services/control-panel-roles";
+import { listContributorWatches, unwatchContributorRepo, watchContributorRepo } from "../services/issue-watch";
 import { runFindOpportunities, validateFindOpportunitiesInput, type FindOpportunitiesInput } from "../mcp/find-opportunities";
 import { runIssueRagRetrieval, validateIssueRagInput, type IssueRagInput } from "../mcp/issue-rag";
 import { buildBoundaryTestGenerationFinding, buildBoundaryTestGenerationSpec } from "../signals/boundary-test-generation";
@@ -453,6 +455,12 @@ const MAX_LOCAL_BRANCH_TEXT_CHARS = 4000;
 // (src/mcp/server.ts) minus `login` (which is the path param): `ids` is optional (absent = mark all delivered).
 const markNotificationsReadBodySchema = z.object({
   ids: z.array(z.string().min(1).max(MAX_NOTIFICATION_DELIVERY_ID_LENGTH)).max(MAX_NOTIFICATION_MARK_READ_IDS).optional(),
+});
+
+// #6746: body of POST /v1/contributors/:login/watches. Mirrors watchIssuesShape minus login/action.
+const watchIssuesBodySchema = z.object({
+  repoFullName: z.string().min(3).max(200),
+  labels: z.array(z.string().min(1).max(100)).max(50).optional(),
 });
 
 const preflightSchema = z.object({
@@ -3427,6 +3435,43 @@ export function createApp() {
     return c.json({ login: login.toLowerCase(), marked });
   });
 
+  // REST mirror of the `loopover_watch_issues` MCP tool — list / watch / unwatch issue-watch subscriptions.
+  // DELETE takes `?repoFullName=` (query is simpler for CLI than a JSON body). (#6746)
+  app.get("/v1/contributors/:login/watches", async (c) => {
+    const login = c.req.param("login");
+    const unauthorized = await requireContributorAccess(c, login);
+    if (unauthorized) return unauthorized;
+    return c.json(await listContributorWatches(c.env, login));
+  });
+
+  app.post("/v1/contributors/:login/watches", async (c) => {
+    const login = c.req.param("login");
+    const unauthorized = await requireContributorAccess(c, login);
+    if (unauthorized) return unauthorized;
+    const parsed = watchIssuesBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid_watch", issues: parsed.error.issues }, 400);
+    const identity = await authenticateRequestIdentity(c);
+    if (identity?.kind === "session" && !(await canWatchRepo(c.env, login, parsed.data.repoFullName))) {
+      return c.json({ error: "forbidden_watch_repo" }, 403);
+    }
+    return c.json(await watchContributorRepo(c.env, login, parsed.data.repoFullName, parsed.data.labels));
+  });
+
+  app.delete("/v1/contributors/:login/watches", async (c) => {
+    const login = c.req.param("login");
+    const unauthorized = await requireContributorAccess(c, login);
+    if (unauthorized) return unauthorized;
+    const repoFullName = c.req.query("repoFullName");
+    if (!repoFullName || repoFullName.length < 3 || repoFullName.length > 200) {
+      return c.json({ error: "invalid_unwatch", detail: "repoFullName query param is required (3–200 chars)" }, 400);
+    }
+    const identity = await authenticateRequestIdentity(c);
+    if (identity?.kind === "session" && !(await canWatchRepo(c.env, login, repoFullName))) {
+      return c.json({ error: "forbidden_watch_repo" }, 403);
+    }
+    return c.json(await unwatchContributorRepo(c.env, login, repoFullName));
+  });
+
   app.get("/v1/contributors/:login/repos/:owner/:repo/decision", async (c) => {
     const login = c.req.param("login");
     const unauthorized = await requireContributorAccess(c, login);
@@ -6194,6 +6239,8 @@ function canSessionAccessPath(env: Env, identity: Extract<AuthIdentity, { kind: 
   if (path === OPPORTUNITIES_FIND_PATH) return true;
   if (path === ISSUE_RAG_RETRIEVE_PATH) return true;
   if (path === LINT_PR_TEXT_PATH || path === VALIDATE_FOCUS_MANIFEST_PATH || path === LINT_SLOP_RISK_PATH || path === LINT_ISSUE_SLOP_PATH) return true;
+  // #6746: self-scoped issue-watch list/watch/unwatch — requireContributorAccess + canWatchRepo enforce scope.
+  if (isContributorWatchesPath(path)) return true;
   if (path === EXTENSION_PULL_CONTEXT_PATH && isExtensionScopedSession(identity)) return true;
   // Contributor extension scope reaches only `/v1/extension/contributors/<login>/*`; the handler's
   // requireContributorAccess then enforces actor === login (self-only).
@@ -6265,6 +6312,12 @@ function isRepoIncidentReportsPath(path: string): boolean {
 function isRepoAgentPendingActionsPath(path: string): boolean { return /^\/v1\/repos\/[^/]+\/[^/]+\/agent\/pending-actions$/.test(path); }
 function isIssueQualityPath(path: string): boolean {
   return /^\/v1\/repos\/[^/]+\/[^/]+\/issue-quality$/.test(path);
+}
+
+// #6746: let any browser session reach the self-scoped watches routes; requireContributorAccess then
+// enforces actor === login, and POST/DELETE additionally gate on canWatchRepo (forbidden_watch_repo).
+function isContributorWatchesPath(path: string): boolean {
+  return /^\/v1\/contributors\/[^/]+\/watches$/.test(path);
 }
 
 function isRepoFocusManifestPath(path: string): boolean {

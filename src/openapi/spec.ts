@@ -27,6 +27,7 @@ import {
   ContributorPrOutcomesSchema,
   NotificationFeedSchema,
   NotificationsMarkedSchema,
+  ContributorWatchesSchema,
   ContributorRewardRiskStrategySchema,
   ContributorProfileSchema,
   ContributorScoringProfileSchema,
@@ -828,6 +829,61 @@ export function buildOpenApiSpec() {
         content: { "application/json": { schema: NotificationsMarkedSchema } },
       },
       400: { description: "Invalid mark-read body" },
+    },
+  });
+  registry.registerPath({
+    method: "get",
+    path: "/v1/contributors/{login}/watches",
+    summary: "List contributor issue-watch subscriptions",
+    request: { params: z.object({ login: z.string() }) },
+    responses: {
+      200: {
+        description: "The contributor's own issue-watch subscriptions (self-scoped). Mirrors loopover_watch_issues action=list.",
+        content: { "application/json": { schema: ContributorWatchesSchema } },
+      },
+    },
+  });
+  registry.registerPath({
+    method: "post",
+    path: "/v1/contributors/{login}/watches",
+    summary: "Watch a repository for new grabbable issues",
+    request: {
+      params: z.object({ login: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              repoFullName: z.string().min(3).max(200),
+              labels: z.array(z.string()).max(50).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Subscribes the contributor to new grabbable issues on the repo (optional label filter).",
+        content: { "application/json": { schema: ContributorWatchesSchema } },
+      },
+      400: { description: "Invalid watch body" },
+      403: { description: "Session cannot watch this repository (forbidden_watch_repo)" },
+    },
+  });
+  registry.registerPath({
+    method: "delete",
+    path: "/v1/contributors/{login}/watches",
+    summary: "Unwatch a repository",
+    request: {
+      params: z.object({ login: z.string() }),
+      query: z.object({ repoFullName: z.string().min(3).max(200) }),
+    },
+    responses: {
+      200: {
+        description: "Removes the contributor's issue-watch subscription for repoFullName (query param).",
+        content: { "application/json": { schema: ContributorWatchesSchema } },
+      },
+      400: { description: "Missing or invalid repoFullName query param" },
+      403: { description: "Session cannot unwatch this repository (forbidden_watch_repo)" },
     },
   });
   registry.registerPath({

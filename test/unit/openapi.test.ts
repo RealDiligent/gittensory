@@ -25,6 +25,10 @@ describe("OpenAPI contract", () => {
     expect(spec.paths["/v1/contributors/{login}/decision-pack"]).toBeDefined();
     expect(spec.paths["/v1/contributors/{login}/open-pr-monitor"]).toBeDefined();
     expect(spec.paths["/v1/contributors/{login}/pr-outcomes"]).toBeDefined();
+    expect(spec.paths["/v1/contributors/{login}/watches"]).toBeDefined();
+    expect(spec.paths["/v1/contributors/{login}/watches"]?.get).toBeDefined();
+    expect(spec.paths["/v1/contributors/{login}/watches"]?.post).toBeDefined();
+    expect(spec.paths["/v1/contributors/{login}/watches"]?.delete).toBeDefined();
     expect(spec.paths["/v1/contributors/{login}/repos/{owner}/{repo}/decision"]).toBeDefined();
     expect(spec.paths["/v1/preflight/pr"]).toBeDefined();
     expect(spec.paths["/v1/preflight/review-risk"]).toBeDefined();

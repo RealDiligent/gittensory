@@ -54,7 +54,7 @@ export function run(args: string[], env: Record<string, string> = {}) {
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
-    // A failing command's message may land on stdout (--json contract) or stderr (plain text) ‚Äî
+    // A failing command's message may land on stdout (--json contract) or stderr (plain text) ù
     // fold both into the thrown Error's message so callers can keep matching it with toThrow(/regex/).
     const failure = error as NodeJS.ErrnoException & { stdout?: string };
     if (failure instanceof Error && failure.stdout) failure.message = `${failure.message}\n${failure.stdout}`;
@@ -87,7 +87,7 @@ export function runAsync(args: string[], env: Record<string, string> = {}) {
   });
 }
 
-/** Run a command expected to fail and return its exit code + both streams, instead of throwing ‚Äî
+/** Run a command expected to fail and return its exit code + both streams, instead of throwing ù
  *  for asserting the shape of the failure output itself (e.g. the --json `{ ok: false, error }` contract). */
 export function runExpectingFailure(args: string[], env: Record<string, string> = {}) {
   try {
@@ -185,6 +185,9 @@ export async function startFixtureServer(
     notifications?: Record<string, unknown>;
     notificationsRead?: Record<string, unknown>;
     onMarkNotificationsRead?: (body: unknown) => void;
+    /** #6746: overrides watches list/watch/unwatch responses and captures mutating request details. */
+    watches?: Record<string, unknown>;
+    onWatchRequest?: (info: { method: string; url: string; body?: unknown }) => void;
     intakeStatus?: number;
     localBranchAnalysisStatus?: number;
     /** #6743: overrides the repo-doc refresh route's default "opened a new PR" response, e.g. to exercise
@@ -333,6 +336,41 @@ export async function startFixtureServer(
     if (request.url === "/v1/contributors/JSONbored/notifications/read" && request.method === "POST") {
       options.onMarkNotificationsRead?.(await readJsonRequest(request));
       response.end(JSON.stringify({ login: "jsonbored", marked: 2, ...(options.notificationsRead ?? {}) }));
+      return;
+    }
+    const watchesMatch = request.url?.match(/^\/v1\/contributors\/([^/]+)\/watches(?:\?(.*))?$/);
+    if (watchesMatch && (request.method === "GET" || request.method === "POST" || request.method === "DELETE")) {
+      const login = decodeURIComponent(watchesMatch[1]!);
+      const query = watchesMatch[2] ? new URLSearchParams(watchesMatch[2]) : null;
+      const body = request.method === "POST" ? await readJsonRequest(request) : undefined;
+      options.onWatchRequest?.({ method: request.method, url: request.url ?? "", body });
+      const base = { ...watchesFixture(login), ...(options.watches ?? {}) };
+      if (request.method === "POST") {
+        const repoFullName = typeof (body as { repoFullName?: string })?.repoFullName === "string" ? (body as { repoFullName: string }).repoFullName : "owner/repo";
+        const labels = Array.isArray((body as { labels?: string[] })?.labels) ? (body as { labels: string[] }).labels : [];
+        response.end(
+          JSON.stringify({
+            ...base,
+            watching: [{ repoFullName, labels }],
+            changed: `watching ${repoFullName}${labels.length > 0 ? ` (labels: ${labels.join(", ")})` : ""}`,
+            summary: `Watching 1 repo(s) for new grabbable issues (watching ${repoFullName}).`,
+          }),
+        );
+        return;
+      }
+      if (request.method === "DELETE") {
+        const repoFullName = query?.get("repoFullName") ?? "owner/repo";
+        response.end(
+          JSON.stringify({
+            ...base,
+            watching: [],
+            changed: `unwatched ${repoFullName}`,
+            summary: `Watching 0 repo(s) for new grabbable issues (unwatched ${repoFullName}).`,
+          }),
+        );
+        return;
+      }
+      response.end(JSON.stringify(base));
       return;
     }
     if (request.url === "/v1/contributors/JSONbored/repos/JSONbored/loopover/decision" && request.method === "GET") {
@@ -497,7 +535,7 @@ export async function startFixtureServer(
       );
       return;
     }
-    // #6744 propose: the CREATE side of the approval queue ‚Äî bare path POST (no trailing slash), so it does NOT
+    // #6744 propose: the CREATE side of the approval queue ù bare path POST (no trailing slash), so it does NOT
     // collide with the decision `.../pending-actions/:id/:decision` POST stub below. Echoes the posted actionClass
     // + pullNumber so a test can assert the CLI serialized the right body.
     if (request.url === "/v1/repos/owner/repo/agent/pending-actions" && request.method === "POST") {
@@ -622,7 +660,7 @@ export async function startFixtureServer(
             { gateType: "missing-linked-issue", blocked: 3, blockedThenMerged: 0, overridden: 0, falsePositiveRate: null },
           ],
           overall: { blocked: 11, blockedThenMerged: 2, falsePositiveRate: 0.182 },
-          signals: ["Highest false-positive gate: `duplicate-pr` ‚Äî 25% of its 8 blocks merged anyway (1 overridden). Keep it advisory until this drops."],
+          signals: ["Highest false-positive gate: `duplicate-pr` ù 25% of its 8 blocks merged anyway (1 overridden). Keep it advisory until this drops."],
         }),
       );
       return;
@@ -639,7 +677,7 @@ export async function startFixtureServer(
             { band: "high", sampleSize: 4, merged: 1, closed: 3, mergeRate: 0.25 },
           ],
           recommendations: { total: 20, positive: 14, negative: 3, pending: 3, positiveRate: 0.82 },
-          signals: ["Higher-slop bands merge less often ‚Äî the slop signal is tracking real outcomes."],
+          signals: ["Higher-slop bands merge less often ù the slop signal is tracking real outcomes."],
         }),
       );
       return;
@@ -1034,6 +1072,15 @@ export function notificationsReadFixture() {
   return { login: "jsonbored", marked: 2 };
 }
 
+/** #6746: mirrors ContributorWatches { login, watching, summary } from GET /watches. */
+export function watchesFixture(login = "jsonbored") {
+  return {
+    login: login.toLowerCase(),
+    watching: [{ repoFullName: "JSONbored/loopover", labels: ["bug"] }],
+    summary: "Watching 1 repo(s) for new grabbable issues.",
+  };
+}
+
 export function decisionPackFixture() {
   return {
     status: "ready",
@@ -1171,7 +1218,7 @@ export function slopRiskFixture(input: {
   };
 }
 
-/** #6748: fixture for POST /v1/lint/improvement-potential ‚Äî mirrors a mild positive signal when tests accompany code. */
+/** #6748: fixture for POST /v1/lint/improvement-potential ù mirrors a mild positive signal when tests accompany code. */
 export function improvementPotentialFixture(input: {
   changedFiles?: Array<{ path: string; additions?: number; deletions?: number }>;
   tests?: string[];
@@ -1230,7 +1277,7 @@ export function issueSlopFixture(input: { title?: string; body?: string } = {}) 
       : titleOnly
         ? [{ code: "title_restatement", title: "Issue body only restates the title", severity: "warning", detail: "Add specific detail beyond the title." }]
         : [];
-  // #6990: blunted like the route ‚Äî band + findings only, no numeric score or rubric.
+  // #6990: blunted like the route ù band + findings only, no numeric score or rubric.
   return {
     band: slopRisk <= 0 ? "clean" : slopRisk < 25 ? "low" : slopRisk < 60 ? "elevated" : "high",
     findings,

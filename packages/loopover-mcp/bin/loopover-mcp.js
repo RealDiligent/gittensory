@@ -93,6 +93,7 @@ const CLI_COMMAND_SPEC = {
   "explain-review-risk": [],
   notifications: [],
   "notifications-read": [],
+  "watch-issues": ["list", "watch", "unwatch"],
   "analyze-branch": [],
   preflight: [],
   "review-pr": [],
@@ -1150,6 +1151,12 @@ const STDIO_TOOL_DESCRIPTORS = [
       "Return a contributor's own post-merge outcome records — for each merged PR, a public-safe attribution of what it did for their standing on the repo. Self-scoped: only the authenticated login's outcomes.",
   },
   {
+    name: "loopover_watch_issues",
+    category: "utility",
+    description:
+      "Watch repos for NEW grabbable, high-multiplier issues (maintainer-created, not WIP). action=watch subscribes a repo (optional label filter), unwatch removes it, list (default) returns your watches. When a matching issue opens you're notified via loopover_list_notifications. Self-scoped to the authenticated login.",
+  },
+  {
     name: "loopover_compare_pr_variants",
     category: "branch",
     description: "Compare private LoopOver scoring previews across local/metadata variants.",
@@ -2114,6 +2121,24 @@ registerStdioTool(
   async ({ login, limit }) => {
     const payload = await getPrOutcomes(login, limit);
     return toolResult(prOutcomesToolSummary(login, payload), payload);
+  },
+);
+
+// #6746: CLI/stdio mirror of remote loopover_watch_issues — proxies GET/POST/DELETE /v1/contributors/:login/watches.
+registerStdioTool(
+  "loopover_watch_issues",
+  {
+    description: stdioToolDescription("loopover_watch_issues"),
+    inputSchema: {
+      login: z.string().min(1),
+      action: z.enum(["watch", "unwatch", "list"]).default("list"),
+      repoFullName: z.string().min(3).max(200).optional(),
+      labels: z.array(z.string().min(1).max(100)).max(50).optional(),
+    },
+  },
+  async ({ login, action, repoFullName, labels }) => {
+    const payload = await manageWatches(login, action ?? "list", repoFullName, labels);
+    return toolResult(payload.summary ?? `Watching ${payload.watching?.length ?? 0} repo(s).`, payload);
   },
 );
 
@@ -3474,6 +3499,7 @@ async function runCli(args) {
   if (command === "explain-review-risk") return explainReviewRiskCli(options);
   if (command === "notifications") return notificationsCli(options);
   if (command === "notifications-read") return notificationsReadCli(options);
+  if (command === "watch-issues") return watchIssuesCli(args.slice(1));
   if (command === "review-pr") return reviewPrCli(options);
   if (command !== "analyze-branch" && command !== "preflight") {
     const suggestion = suggestCommand(command);
@@ -4100,6 +4126,69 @@ async function notificationsReadCli(options) {
   process.stdout.write(`Marked ${payload.marked} LoopOver notification(s) read for ${login}.\n`);
 }
 
+function printWatchIssuesHelp() {
+  process.stdout.write(
+    [
+      "Usage: loopover-mcp watch-issues list|watch|unwatch [--login <github-login>] [--json]",
+      "",
+      "Manage your issue-watch subscriptions (new grabbable issues on watched repos).",
+      "Mirrors the loopover_watch_issues MCP tool and GET/POST/DELETE /v1/contributors/{login}/watches.",
+      "",
+      "  list                         List your current watches.",
+      "  watch <owner/repo>           Subscribe to a repo. Optional --labels a,b filter.",
+      "  unwatch <owner/repo>         Remove a subscription. Also accepts --repo owner/repo.",
+      "",
+      "DELETE uses ?repoFullName= query (not a JSON body) for CLI simplicity.",
+      "Pass --json for machine-readable output.",
+    ].join("\n") + "\n",
+  );
+}
+
+// #6746: CLI mirror of loopover_watch_issues. Subcommands list|watch|unwatch proxy the REST routes.
+async function watchIssuesCli(args) {
+  const subcommand = args[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "help") return printWatchIssuesHelp();
+  const positional = args[1] && !args[1].startsWith("--") ? args[1] : undefined;
+  const options = parseOptions(args.slice(1));
+  if (options.help === true) return printWatchIssuesHelp();
+  const login = options.login ?? activeProfile.session?.login ?? process.env.LOOPOVER_LOGIN ?? process.env.GITHUB_LOGIN;
+  if (!login) throw new Error("Pass --login <github-login>, log in with `loopover-mcp login`, or set LOOPOVER_LOGIN.");
+  if (subcommand === "list") {
+    const payload = await manageWatches(login, "list");
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+      return;
+    }
+    process.stdout.write(`${sanitizePlainTextTerminalOutput(payload.summary)}\n`);
+    for (const entry of payload.watching ?? []) {
+      const labelSuffix = entry.labels?.length ? ` [${entry.labels.join(", ")}]` : "";
+      process.stdout.write(`  ${sanitizePlainTextTerminalOutput(`${entry.repoFullName}${labelSuffix}`)}\n`);
+    }
+    return;
+  }
+  if (subcommand === "watch" || subcommand === "unwatch") {
+    const repoFullName = positional ?? options.repo ?? options.repoFullName;
+    if (!repoFullName || !String(repoFullName).includes("/")) {
+      throw new Error(`Usage: loopover-mcp watch-issues ${subcommand} <owner/repo> --login <github-login>`);
+    }
+    let labels;
+    if (subcommand === "watch" && options.labels != null) {
+      labels = String(options.labels)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+    }
+    const payload = await manageWatches(login, subcommand, repoFullName, labels);
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+      return;
+    }
+    process.stdout.write(`${sanitizePlainTextTerminalOutput(payload.summary)}\n`);
+    return;
+  }
+  throw new Error(`Unknown watch-issues subcommand: ${subcommand}. Use list | watch | unwatch.`);
+}
+
 function printRepoDecisionHelp() {
   process.stdout.write(
     [
@@ -4585,6 +4674,7 @@ function printHelp() {
   loopover-mcp explain-review-risk --repo owner/repo --title <text> [--login <github-login>] [--body <text>] [--json]
   loopover-mcp notifications --login <github-login> [--json]
   loopover-mcp notifications-read --login <github-login> [--id <delivery-id>]... [--json]
+  loopover-mcp watch-issues list|watch|unwatch [--login <github-login>] [--labels a,b] [--json]
   loopover-mcp analyze-branch --login <github-login> [--repo owner/repo] [--base origin/main] [--branch-eligibility eligible|ineligible|unknown] [--pending-merged-prs 3] [--expected-open-prs 0] [--projected-credibility 0.8] [--scenario-note "..."] [--validation "passed|npm test|summary"] [--format table] [--json]
   loopover-mcp preflight --login <github-login> [--repo owner/repo] [--base origin/main] [--branch-eligibility eligible|ineligible|unknown] [--pending-merged-prs 3] [--expected-open-prs 0] [--projected-credibility 0.8] [--validation "passed|npm test|summary"] [--format table] [--json]
   loopover-mcp review-pr --login <github-login> [--repo owner/repo] [--base origin/main] [--commit <message>]... [--body <text>] [--body-file <path>] [--linked-issue <number>] [--json]
@@ -4603,7 +4693,7 @@ function printHelp() {
   LOOPOVER_PROFILE
   LOOPOVER_CONFIG_PATH or LOOPOVER_CONFIG_DIR
   LOOPOVER_API_TOKEN, LOOPOVER_MCP_TOKEN, LOOPOVER_TOKEN, or a session from loopover-mcp login
-  LOOPOVER_LOGIN or GITHUB_LOGIN (default --login for analyze-branch, preflight, review-pr, decision-pack, repo-decision, monitor-open-prs, pr-outcomes, notifications, notifications-read, and agent plan/packet)
+  LOOPOVER_LOGIN or GITHUB_LOGIN (default --login for analyze-branch, preflight, review-pr, decision-pack, repo-decision, monitor-open-prs, pr-outcomes, notifications, notifications-read, watch-issues, and agent plan/packet)
   GITHUB_TOKEN for non-interactive login bootstrap
   GITTENSOR_SCORE_PREVIEW_CMD
   GITTENSOR_ROOT
@@ -5745,6 +5835,17 @@ function getNotifications(login) {
 }
 function postMarkNotificationsRead(login, ids) {
   return apiPost(`/v1/contributors/${encodeURIComponent(login)}/notifications/read`, ids ? { ids } : {});
+}
+
+// #6746: thin REST proxies for issue-watch list/watch/unwatch.
+function manageWatches(login, action, repoFullName, labels) {
+  const base = `/v1/contributors/${encodeURIComponent(login)}/watches`;
+  if (action === "list") return apiGet(base);
+  if (action === "watch") return apiPost(base, stripUndefined({ repoFullName, labels }));
+  if (action === "unwatch") {
+    return apiFetch(`${base}?repoFullName=${encodeURIComponent(repoFullName)}`, { method: "DELETE" });
+  }
+  throw new Error(`Unknown watch action: ${action}`);
 }
 
 // Mirror the API's own `summary` when it sends one, so the CLI and the loopover_monitor_open_prs MCP

@@ -31,6 +31,7 @@ import {
   type AuthIdentity,
 } from "../auth/security";
 import { canLoginAccessRepo, canWatchRepo, loadControlPanelAccessScope, loadControlPanelRoleSummary, type ControlPanelAccessScope } from "../services/control-panel-roles";
+import { manageContributorWatches } from "../services/issue-watch";
 import {
   countOpenIssues,
   countPendingAgentActions,
@@ -57,10 +58,7 @@ import {
   listContributorPullRequests,
   listIssueSignalSample,
   listIssues,
-  deleteIssueWatchSubscription,
-  listIssueWatchSubscriptionsForLogin,
   listNotificationDeliveriesForRecipient,
-  upsertIssueWatchSubscription,
   upsertRepositorySettings,
   listOpenPullRequests,
   listPullRequests,
@@ -3843,25 +3841,23 @@ export class LoopoverMcp {
     };
   }
 
-  // #699 path B: manage a miner's issue-watch subscriptions. Self-scoped; watch/unwatch need repoFullName.
+  // #699 path B / #6746: manage a miner's issue-watch subscriptions via shared helpers. Self-scoped;
+  // watch/unwatch need repoFullName and (for sessions) requireWatchableRepo.
   private async watchIssues(input: z.infer<z.ZodObject<typeof watchIssuesShape>>): Promise<ToolPayload> {
     this.requireContributorAccess(input.login);
-    let changed: string | undefined;
-    if (input.action === "watch" || input.action === "unwatch") {
-      if (!input.repoFullName) return { summary: `${input.action} requires repoFullName.`, data: {} };
+    if ((input.action === "watch" || input.action === "unwatch") && input.repoFullName) {
       await this.requireWatchableRepo(input.login, input.repoFullName);
-      if (input.action === "watch") {
-        await upsertIssueWatchSubscription(this.env, { login: input.login, repoFullName: input.repoFullName, labels: input.labels });
-        changed = `watching ${input.repoFullName}${input.labels && input.labels.length > 0 ? ` (labels: ${input.labels.join(", ")})` : ""}`;
-      } else {
-        const removed = await deleteIssueWatchSubscription(this.env, input.login, input.repoFullName);
-        changed = removed ? `unwatched ${input.repoFullName}` : `was not watching ${input.repoFullName}`;
-      }
     }
-    const watching = (await listIssueWatchSubscriptionsForLogin(this.env, input.login)).map((sub) => ({ repoFullName: sub.repoFullName, labels: sub.labels }));
+    const result = await manageContributorWatches(this.env, input);
+    if ("missingRepo" in result) return { summary: result.summary, data: {} };
     return {
-      summary: `Watching ${watching.length} repo(s) for new grabbable issues${changed ? ` (${changed})` : ""}.`,
-      data: { watching, ...(changed ? { changed } : {}) } as unknown as Record<string, unknown>,
+      summary: result.summary,
+      data: {
+        login: result.login,
+        watching: result.watching,
+        summary: result.summary,
+        ...(result.changed ? { changed: result.changed } : {}),
+      } as unknown as Record<string, unknown>,
     };
   }
 

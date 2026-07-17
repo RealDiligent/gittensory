@@ -510,6 +510,22 @@ export const NotificationsMarkedSchema = z
   })
   .openapi("NotificationsMarked");
 
+export const ContributorWatchEntrySchema = z
+  .object({
+    repoFullName: z.string(),
+    labels: z.array(z.string()),
+  })
+  .openapi("ContributorWatchEntry");
+
+export const ContributorWatchesSchema = z
+  .object({
+    login: z.string(),
+    watching: z.array(ContributorWatchEntrySchema),
+    summary: z.string(),
+    changed: z.string().optional(),
+  })
+  .openapi("ContributorWatches");
+
 export const ContributorOpportunitySchema = z
   .object({
     repoFullName: z.string(),

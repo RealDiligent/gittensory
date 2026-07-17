@@ -14527,6 +14527,49 @@
           "recommendation",
           "summary"
         ]
+      },
+      "ContributorWatches": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "watching": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContributorWatchEntry"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "changed": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "login",
+          "watching",
+          "summary"
+        ]
+      },
+      "ContributorWatchEntry": {
+        "type": "object",
+        "properties": {
+          "repoFullName": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "repoFullName",
+          "labels"
+        ]
       }
     },
     "parameters": {},
@@ -18926,6 +18969,155 @@
           },
           "403": {
             "description": "Forbidden when contributorLogin does not match the authenticated session"
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/v1/contributors/{login}/watches": {
+      "get": {
+        "summary": "List contributor issue-watch subscriptions",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The contributor's own issue-watch subscriptions (self-scoped). Mirrors loopover_watch_issues action=list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorWatches"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Watch a repository for new grabbable issues",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repoFullName": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 200
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 50
+                  }
+                },
+                "required": [
+                  "repoFullName"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscribes the contributor to new grabbable issues on the repo (optional label filter).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorWatches"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid watch body"
+          },
+          "403": {
+            "description": "Session cannot watch this repository (forbidden_watch_repo)"
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Unwatch a repository",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "repoFullName",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removes the contributor's issue-watch subscription for repoFullName (query param).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorWatches"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid repoFullName query param"
+          },
+          "403": {
+            "description": "Session cannot unwatch this repository (forbidden_watch_repo)"
           }
         },
         "security": [

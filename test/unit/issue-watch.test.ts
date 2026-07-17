@@ -182,6 +182,13 @@ describe("MCP loopover_watch_issues", () => {
     expect((unwatched.structuredContent as { watching: unknown[] }).watching).toHaveLength(0);
   });
 
+  it("returns a clear summary when watch/unwatch omit repoFullName", async () => {
+    const env = createTestEnv();
+    const client = await connect(env);
+    const result = await client.callTool({ name: "loopover_watch_issues", arguments: { login: "miner", action: "watch" } });
+    expect(result.isError).toBeFalsy();
+    expect((result as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? JSON.stringify(result)).toMatch(/watch requires repoFullName/);
+  });
 
   it("lets a session watch a tracked PUBLIC repo it does not maintain (the miner use case)", async () => {
     const env = createTestEnv();
