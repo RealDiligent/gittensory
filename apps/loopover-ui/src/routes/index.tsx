@@ -4,6 +4,7 @@ import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { useLocalStorage } from "@/lib/use-local-storage";
 
 import { AnimatedTerminal } from "@/components/site/animated-terminal";
 import { ScoreabilityStory } from "@/components/site/home/scoreability-story";
@@ -511,13 +512,36 @@ args = ["-y", "@loopover/mcp@latest", "--stdio"]`,
 ];
 
 export function ClientSetupTabs() {
-  const [active, setActive] = useState<ClientTabId>(() => {
-    if (typeof window === "undefined") return "miners";
-    return (window.localStorage.getItem("gt:install-tab") as ClientTabId) ?? "miners";
-  });
+  // #6814: SSR-safe persistence — never read localStorage in the useState initializer (server has no
+  // window; a client-only read there mismatches hydration). useLocalStorage starts at "miners" and
+  // hydrates post-mount, matching app.workbench.tsx.
+  const [stored, setStored, hydrated] = useLocalStorage<ClientTabId>("gt:install-tab", "miners");
   const [copied, setCopied] = useState(false);
-  const current = CLIENT_TABS.find((t) => t.id === active) ?? CLIENT_TABS[0];
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Pre-#6814 wrote a bare tab id (not JSON). Migrate once so useLocalStorage can parse it.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const raw = window.localStorage.getItem("gt:install-tab");
+      if (raw == null) return;
+      try {
+        JSON.parse(raw);
+      } catch {
+        if (CLIENT_TABS.some((tab) => tab.id === raw)) {
+          setStored(raw as ClientTabId);
+        }
+      }
+    } catch {
+      /* noop */
+    }
+  }, [hydrated, setStored]);
+
+  // Until hydrated, always render the SSR default so markup matches the server.
+  const active: ClientTabId =
+    !hydrated || !CLIENT_TABS.some((tab) => tab.id === stored) ? "miners" : stored;
+  const setActive = (id: ClientTabId) => setStored(id);
+  const current = CLIENT_TABS.find((t) => t.id === active) ?? CLIENT_TABS[0];
 
   // ARIA APG tabs pattern (#6813): ArrowLeft/ArrowRight move (wrapping) and automatically activate the
   // adjacent tab, Home/End jump to the first/last tab -- matching every other tabbed UI in this codebase
@@ -542,14 +566,6 @@ export function ClientSetupTabs() {
       focusTab(CLIENT_TABS[CLIENT_TABS.length - 1]!.id);
     }
   };
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("gt:install-tab", active);
-    } catch {
-      /* noop */
-    }
-  }, [active]);
 
   const onCopy = async () => {
     try {

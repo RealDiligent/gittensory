@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ClientSetupTabs } from "./index";
@@ -8,9 +8,9 @@ import { ClientSetupTabs } from "./index";
 // the shared Radix-backed Tabs primitive. This is the regression test for that gap.
 
 describe("ClientSetupTabs keyboard navigation (#6813)", () => {
-  // ClientSetupTabs persists the active tab to localStorage ("gt:install-tab") and reads it back as the
-  // initial state on mount -- without clearing it, a later test's initial "miners" tab assumption breaks
-  // because an earlier test in this file left a different tab persisted.
+  // ClientSetupTabs persists the active tab to localStorage ("gt:install-tab") and reads it back post-
+  // hydrate -- without clearing it, a later test's initial "miners" tab assumption breaks because an
+  // earlier test in this file left a different tab persisted.
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -98,5 +98,52 @@ describe("ClientSetupTabs keyboard navigation (#6813)", () => {
     fireEvent.click(codexTab);
 
     expect(codexTab.getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("ClientSetupTabs SSR-safe install-tab persistence (#6814)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("initial render is always miners even when localStorage already holds another tab", async () => {
+    window.localStorage.setItem("gt:install-tab", JSON.stringify("cursor"));
+    render(<ClientSetupTabs />);
+    // First paint must match the SSR default — not the stored value.
+    expect(screen.getByRole("tab", { name: /Miner CLI/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /Cursor/i }).getAttribute("aria-selected")).toBe(
+      "false",
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Cursor/i }).getAttribute("aria-selected")).toBe(
+        "true",
+      );
+    });
+  });
+
+  it("migrates a pre-#6814 bare tab id and selects it after hydrate", async () => {
+    window.localStorage.setItem("gt:install-tab", "codex");
+    render(<ClientSetupTabs />);
+    expect(screen.getByRole("tab", { name: /Miner CLI/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /Codex/i }).getAttribute("aria-selected")).toBe(
+        "true",
+      );
+    });
+    expect(JSON.parse(window.localStorage.getItem("gt:install-tab")!)).toBe("codex");
+  });
+
+  it("persists the selected tab as JSON after a click", async () => {
+    render(<ClientSetupTabs />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("tab", { name: /Remote MCP/i }));
+    });
+    expect(JSON.parse(window.localStorage.getItem("gt:install-tab")!)).toBe("remote");
   });
 });
