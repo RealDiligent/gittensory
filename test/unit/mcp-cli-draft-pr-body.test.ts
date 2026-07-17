@@ -142,7 +142,7 @@ describe("loopover_draft_pr_body stdio mirror (#6741)", () => {
     const data = structured(result);
     expect(data).toMatchObject({
       title: "Local branch preflight",
-      repoFullName: "JSONbored/gittensory",
+      repoFullName: "JSONbored/loopover",
       sourceUploadDisabled: true,
     });
     expect(typeof data.markdown).toBe("string");
