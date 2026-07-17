@@ -79,8 +79,8 @@ export async function unwatchContributorRepo(env: Env, login: string, repoFullNa
 export type ManageContributorWatchesInput = {
   login: string;
   action: "list" | "watch" | "unwatch";
-  repoFullName?: string;
-  labels?: string[];
+  repoFullName?: string | undefined;
+  labels?: string[] | undefined;
 };
 
 /**
