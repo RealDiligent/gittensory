@@ -14347,6 +14347,64 @@
             ]
           }
         ]
+      },
+      "ContributorPrOutcomes": {
+        "type": "object",
+        "properties": {
+          "login": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "repoFullName": {
+                  "type": "string"
+                },
+                "pullNumber": {
+                  "type": "number",
+                  "nullable": true
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "merged"
+                  ]
+                },
+                "attribution": {
+                  "type": "string"
+                },
+                "deeplink": {
+                  "type": "string"
+                },
+                "recordedAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "repoFullName",
+                "pullNumber",
+                "outcome",
+                "attribution",
+                "deeplink",
+                "recordedAt"
+              ]
+            }
+          }
+        },
+        "required": [
+          "login",
+          "count",
+          "summary",
+          "outcomes"
+        ]
       }
     },
     "parameters": {},
@@ -18576,6 +18634,52 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RepoDocRefreshResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "LoopOverBearer": []
+          },
+          {
+            "LoopOverSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/v1/contributors/{login}/pr-outcomes": {
+      "get": {
+        "summary": "Contributor post-merge PR outcome history",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "login",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "exclusiveMinimum": true,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Self-scoped post-merge outcome records with public-safe attribution (mirrors loopover_pr_outcome).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContributorPrOutcomes"
                 }
               }
             }
