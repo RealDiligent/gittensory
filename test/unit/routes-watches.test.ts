@@ -218,6 +218,24 @@ describe("DELETE /v1/contributors/:login/watches (#6746)", () => {
     await expect(response.json()).resolves.toEqual({ error: "forbidden_watch_repo" });
   });
 
+  it("lets a session unwatch a tracked public repo", async () => {
+    const app = createApp();
+    const env = createTestEnv();
+    await upsertRepositoryFromGitHub(env, { name: "repo", full_name: "owner/repo", private: false, owner: { login: "owner" }, default_branch: "main" }, 100);
+    await upsertIssueWatchSubscription(env, { login: "miner1", repoFullName: "owner/repo" });
+    const { token } = await createSessionForGitHubUser(env, { login: "miner1", id: 1 });
+    const response = await app.request("/v1/contributors/miner1/watches?repoFullName=owner%2Frepo", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+    }, env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      login: "miner1",
+      watching: [],
+      changed: "unwatched owner/repo",
+    });
+  });
+
   it("returns the same payload the MCP tool returns for action=unwatch (mirror parity)", async () => {
     const restEnv = createTestEnv();
     await upsertIssueWatchSubscription(restEnv, { login: "miner1", repoFullName: "acme/widgets" });

@@ -3451,7 +3451,9 @@ export function createApp() {
     const parsed = watchIssuesBodySchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "invalid_watch", issues: parsed.error.issues }, 400);
     const identity = await authenticateRequestIdentity(c);
-    if (identity?.kind === "session" && !(await canWatchRepo(c.env, login, parsed.data.repoFullName))) {
+    /* v8 ignore next -- requireContributorAccess already authenticated this request. */
+    if (!identity) return c.json({ error: "unauthorized" }, 401);
+    if (identity.kind === "session" && !(await canWatchRepo(c.env, login, parsed.data.repoFullName))) {
       return c.json({ error: "forbidden_watch_repo" }, 403);
     }
     return c.json(await watchContributorRepo(c.env, login, parsed.data.repoFullName, parsed.data.labels));
@@ -3466,7 +3468,9 @@ export function createApp() {
       return c.json({ error: "invalid_unwatch", detail: "repoFullName query param is required (3–200 chars)" }, 400);
     }
     const identity = await authenticateRequestIdentity(c);
-    if (identity?.kind === "session" && !(await canWatchRepo(c.env, login, repoFullName))) {
+    /* v8 ignore next -- requireContributorAccess already authenticated this request. */
+    if (!identity) return c.json({ error: "unauthorized" }, 401);
+    if (identity.kind === "session" && !(await canWatchRepo(c.env, login, repoFullName))) {
       return c.json({ error: "forbidden_watch_repo" }, 403);
     }
     return c.json(await unwatchContributorRepo(c.env, login, repoFullName));
