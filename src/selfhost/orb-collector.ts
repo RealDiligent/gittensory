@@ -195,6 +195,8 @@ export async function exportOrbBatch(db: D1Database, batchSize = 200, fetchFn: t
 
   const payload: OrbExportPayload = {
     instance_id: instance,
+    /* v8 ignore next -- D1's .all() always returns a `results` array (possibly empty), never omits the field;
+     *  the ?? [] only guards the driver's own optional typing, not a real runtime path. */
     events: (results ?? []).map((r) => ({
       repo_hash: anonymize ? hmacAnonymize(r.project, secret) : r.project,
       pr_hash: anonymize ? hmacAnonymize(r.target_id, secret) : r.target_id,
@@ -253,6 +255,7 @@ export async function exportOrbBatch(db: D1Database, batchSize = 200, fetchFn: t
       .run();
   }
 
+  /* v8 ignore next -- same D1 .all() guarantee as above: `results` is always at least an empty array here. */
   const exportedCount = results?.length ?? 0;
   if (exportedCount > 0) incr("loopover_orb_events_exported_total", {}, exportedCount);
   return exportedCount;

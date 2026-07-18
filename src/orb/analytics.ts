@@ -280,6 +280,9 @@ export async function getFleetHealthSummary(env: Env, now: Date = new Date()): P
       .first<{ healthy_count: number | null; unhealthy_count: number | null; total_count: number }>();
     const healthyCount = Number(row?.healthy_count ?? 0);
     const unhealthyCount = Number(row?.unhealthy_count ?? 0);
+    /* v8 ignore next -- COUNT(*) always returns a non-null number for a matched row (unlike the SUM(CASE...)
+     *  cells above, which legitimately return NULL over zero matching rows); the ?? 0 only guards `row` being
+     *  absent entirely, which a scalar aggregate query never produces. */
     const totalCount = Number(row?.total_count ?? 0);
     return { healthyCount, unhealthyCount, unknownCount: totalCount - healthyCount - unhealthyCount, totalCount };
   } catch {
