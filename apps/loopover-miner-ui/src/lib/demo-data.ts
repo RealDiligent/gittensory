@@ -77,7 +77,7 @@ function buildQueueSummary(items: PortfolioQueueActionItem[]): PortfolioQueueSum
   const repos = [DEMO_REPO_A, DEMO_REPO_B].map((repoFullName) => {
     const repoItems = items.filter((item) => item.repoFullName === repoFullName);
     const repoByStatus = {
-      queued: repoFullName === DEMO_REPO_A ? 1 : 1,
+      queued: 1,
       in_progress: repoItems.filter((i) => i.status === "in_progress").length,
       done: repoItems.filter((i) => i.status === "done").length,
     };
