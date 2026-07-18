@@ -34,7 +34,10 @@ function createBrowserSafeRegistry() {
         handler: (request: unknown) => Promise<unknown>;
       },
     ) {
-      if (typeof definition.handler !== "function" || !(definition.handler as { [k: symbol]: unknown })[GOVERNOR_GATED]) {
+      if (
+        typeof definition.handler !== "function" ||
+        !(definition.handler as { [k: symbol]: unknown })[GOVERNOR_GATED]
+      ) {
         throw new Error(`registerChatAction("${name}"): handler must be produced by governorGatedHandler()`);
       }
       if (actions.has(name)) {
@@ -102,8 +105,7 @@ vi.mock("../../packages/loopover-miner/lib/chat-action-dispatch.js", () => ({
     }
     const registry = options.registry ?? sharedBrowserRegistry;
     const entry = registry.get(request.action ?? "") as
-      | { paramsValidator: (params: unknown) => boolean; handler: (request: unknown) => Promise<unknown> }
-      | undefined;
+      { paramsValidator: (params: unknown) => boolean; handler: (request: unknown) => Promise<unknown> } | undefined;
     if (!entry) return { ok: false, status: "unknown_action", action: request.action };
     if (!entry.paramsValidator(request.params)) {
       return { ok: false, status: "invalid_params", action: request.action };
