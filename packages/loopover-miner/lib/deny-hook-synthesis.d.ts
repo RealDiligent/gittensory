@@ -19,7 +19,7 @@ export type DenyHookSynthesisStore = {
  * Derive candidate deny-hook rules from blocker/path history. Miner-facing wrapper over the engine's pure
  * `synthesizeDenyRuleProposals`, defaulting the injected clock to `Date.now()` so this keeps the pre-#5667 2-arg
  * signature (and wall-clock `audit.synthesizedAt`) every existing caller and test relies on. Returns proposal
- * objects only вЂ” nothing is active until a maintainer approves them (see resolveEffectiveDenyRules).
+ * objects only — nothing is active until a maintainer approves them (see resolveEffectiveDenyRules).
  */
 export declare function synthesizeDenyRuleProposals(records: unknown, config?: SynthesisConfig): DenyRuleProposal[];
 export declare function resolveDenyHookSynthesisDbPath(env?: Record<string, string | undefined>): string;
