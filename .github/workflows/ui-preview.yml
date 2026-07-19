@@ -16,9 +16,15 @@ on:
     # build job below skips draft PRs, marking a PR ready must itself trigger a real preview build (#6670),
     # not wait for the next push. Mirrors ci.yml's pull_request.types comment/list exactly.
     types: [opened, synchronize, reopened, ready_for_review]
+    # Scoped to exactly what apps/loopover-ui actually depends on (packages/loopover-ui-kit only) --
+    # NOT the whole "packages/**" workspace, which also matches loopover-miner/loopover-mcp/loopover-engine/
+    # discovery-index and previously built+deployed a pointless preview for every PR touching those (#ci-scope).
+    # This check isn't required (see branch protection), so a future package apps/loopover-ui starts
+    # depending on that isn't added here will silently stop getting previews rather than failing loud --
+    # keep this list in sync with what apps/loopover-ui/package.json actually imports.
     paths:
       - "apps/loopover-ui/**"
-      - "packages/**"
+      - "packages/loopover-ui-kit/**"
 
 permissions:
   contents: read
