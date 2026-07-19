@@ -5,7 +5,13 @@
     "rootDir": "test",
     "outDir": "dist-test",
     "declaration": false,
-    "noEmit": false
+    "noEmit": false,
+    // Distinct from tsconfig.json's own "./.tsbuildinfo" (this config extends that file, so without an
+    // override here it would inherit the SAME explicit path -- two different rootDir/outDir/include sets
+    // sharing one incremental-state file, corrupting each other exactly like the collision this fixes).
+    // Named to END in ".tsbuildinfo" (not start with it) so it's still matched by .gitignore's existing
+    // "*.tsbuildinfo" glob -- ".tsbuildinfo-test" would NOT match that pattern and would leak as untracked.
+    "tsBuildInfoFile": "./.test.tsbuildinfo"
   },
   "include": ["test"]
 }

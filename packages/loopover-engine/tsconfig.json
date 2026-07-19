@@ -7,7 +7,15 @@
     "declaration": true,
     "rootDir": "src",
     "outDir": "dist",
-    "noEmit": false
+    "noEmit": false,
+    // Without this, the inherited root value (tsconfig.json:24, "./.tsbuildinfo") resolves relative to
+    // the ROOT config's location, not this one -- this package's build and the root Typecheck step would
+    // then read/write the exact same cache file at the repo root and corrupt each other's incremental
+    // state (the same collision packages/loopover-miner/tsconfig.json already documents and fixes the
+    // same way). Currently masked in CI by step order (the root cache restore always runs after this
+    // package's build and overwrites whatever it just wrote, before Typecheck reads it) -- but that
+    // makes the inherited value a landmine for the next reordering, not a working fix.
+    "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["src"],
   "exclude": ["src/signals/engine.ts"]
