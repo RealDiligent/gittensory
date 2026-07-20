@@ -305,6 +305,85 @@ describe("AuditFeed", () => {
     );
   });
 
+  it("ignores a loadMore response after filters change mid-flight (#7506)", async () => {
+    const firstPage = {
+      ...SAMPLE,
+      hasMore: true,
+      offset: 0,
+      items: [
+        {
+          repoFullName: "repo-owner/owned-repo",
+          pullNumber: 6,
+          reason: "surface_off",
+          timestamp: "2026-05-28T00:00:04.000Z",
+          remediation: "Enable a PR public surface in repository settings.",
+        },
+      ],
+    };
+    const filteredPage = {
+      ...SAMPLE,
+      hasMore: false,
+      offset: 0,
+      items: [
+        {
+          repoFullName: "repo-owner/other-repo",
+          pullNumber: 9,
+          reason: "bot_author",
+          timestamp: "2026-05-28T00:00:06.000Z",
+          remediation: "Bot authors are excluded from public PR surfaces.",
+        },
+      ],
+    };
+    const staleMorePage = {
+      ...SAMPLE,
+      hasMore: false,
+      offset: 1,
+      items: [
+        {
+          repoFullName: "repo-owner/owned-repo",
+          pullNumber: 5,
+          reason: "bot_author",
+          timestamp: "2026-05-28T00:00:03.000Z",
+          remediation: "Bot authors are excluded from public PR surfaces.",
+        },
+      ],
+    };
+
+    let resolveMore!: (value: { ok: true; data: typeof staleMorePage }) => void;
+    const morePromise = new Promise<{ ok: true; data: typeof staleMorePage }>((resolve) => {
+      resolveMore = resolve;
+    });
+
+    apiFetch.mockImplementation((url: string) => {
+      if (String(url).includes("offset=1")) return morePromise;
+      if (String(url).includes("repoFullName=")) {
+        return Promise.resolve({ ok: true, data: filteredPage });
+      }
+      return Promise.resolve({ ok: true, data: firstPage });
+    });
+
+    render(<AuditFeed />);
+    expect(await screen.findByText("#6")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /load more/i }));
+    await waitFor(() =>
+      expect(apiFetch.mock.calls.some(([url]) => String(url).includes("offset=1"))).toBe(true),
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("owner/repo"), {
+      target: { value: "repo-owner/other-repo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /apply filters/i }));
+    expect(await screen.findByText("#9")).toBeTruthy();
+    expect(screen.queryByText("#6")).toBeNull();
+
+    resolveMore({ ok: true, data: staleMorePage });
+    await waitFor(() => expect(screen.getByText("#9")).toBeTruthy());
+    expect(screen.queryByText("#6")).toBeNull();
+    expect(screen.queryByText("#5")).toBeNull();
+    expect(screen.getByText("1 event(s)")).toBeTruthy();
+  });
+
   it("shows an error state when the audit response is malformed", async () => {
     apiFetch.mockResolvedValue({ ok: true, data: { generatedAt: "2026-05-28T00:00:05.000Z" } });
     render(<AuditFeed />);
