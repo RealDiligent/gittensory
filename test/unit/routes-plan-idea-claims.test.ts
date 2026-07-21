@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/api/routes";
-import { buildClaimPlan, buildTaskGraph, validateIdeaSubmission } from "../../src/idea-intake";
+import { buildClaimPlan, buildTaskGraph, existingTargetRepo, validateIdeaSubmission } from "../../src/idea-intake";
 import { createTestEnv } from "../helpers/d1";
 
 // #6756: POST /v1/loop/plan-idea-claims — the REST mirror bringing loopover_plan_idea_claims to the same
@@ -21,14 +21,16 @@ const VALID = {
   id: "idea-1",
   title: "Retry uploads on 5xx",
   body: "Uploads fail silently on 5xx.",
-  targetRepo: "acme/widgets",
+  targetRepo: { kind: "existing", repo: "acme/widgets" },
 };
 
 function expectedPayload(body: unknown) {
   const validated = validateIdeaSubmission(body);
   if (!validated.ok) return { ok: false as const, errors: validated.errors };
+  const repo = existingTargetRepo(validated.idea.targetRepo);
+  if (repo === null) return { ok: false as const, errors: ["target_repo_required"] };
   const graph = buildTaskGraph(validated.idea, (body as { decomposition?: never }).decomposition);
-  const claimPlan = buildClaimPlan(graph, validated.idea.targetRepo);
+  const claimPlan = buildClaimPlan(graph, repo);
   return { ok: true as const, verdict: claimPlan.graphVerdict, claimPlan };
 }
 
@@ -81,6 +83,7 @@ describe("POST /v1/loop/plan-idea-claims (#6756)", () => {
       { ...VALID, title: "" },
       { ...VALID, body: "" },
       { ...VALID, targetRepo: "" },
+      { ...VALID, targetRepo: { kind: "provision" } },
     ];
     for (const body of cases) {
       const response = await post(env, body);

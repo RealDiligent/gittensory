@@ -15,7 +15,7 @@ const PATH = "/v1/loop/intake-idea";
 const post = (env: Env, body: unknown) =>
   createApp().request(PATH, { method: "POST", headers: apiHeaders(env), body: JSON.stringify(body) }, env);
 
-const VALID = { id: "idea-1", title: "Retry uploads on 5xx", body: "Uploads fail silently on 5xx.", targetRepo: "acme/widgets" };
+const VALID = { id: "idea-1", title: "Retry uploads on 5xx", body: "Uploads fail silently on 5xx.", targetRepo: { kind: "existing", repo: "acme/widgets" } };
 
 describe("POST /v1/loop/intake-idea (#6755)", () => {
   it("turns a valid submission into a scored task-graph", async () => {
@@ -52,6 +52,7 @@ describe("POST /v1/loop/intake-idea (#6755)", () => {
       { ...VALID, priority: "high" },
       { ...VALID, priority: "normal" },
       { ...VALID, constraints: ["no new deps"], acceptanceHints: ["covered by a unit test"] },
+      { ...VALID, targetRepo: { kind: "provision" } },
       { ...VALID, decomposition: [{ key: "a", title: "Only issue", body: "Body." }] },
       { ...VALID, decomposition: [{ key: "a", title: "First", body: "Body." }, { key: "b", title: "Second", body: "Body.", dependsOn: ["a"] }] },
     ];
