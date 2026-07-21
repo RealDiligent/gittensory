@@ -5532,6 +5532,7 @@ describe("api routes", () => {
     expect(toolNames).toContain("loopover_get_gate_config_effective");
     expect(toolNames).toContain("loopover_get_ams_miner_cohort");
     expect(toolNames).toContain("loopover_get_repo_focus_manifest");
+    expect(toolNames).toContain("loopover_get_selftune_override_audit");
     expect(toolNames).toContain("loopover_get_pr_maintainer_packet");
     expect(toolNames).toContain("loopover_explain_review_risk");
     expect(toolNames).toContain("loopover_compare_pr_variants");
@@ -5811,6 +5812,7 @@ describe("api routes", () => {
       ["loopover_get_gate_config_effective", { owner: "entrius", repo: "allways-ui" }],
       ["loopover_get_ams_miner_cohort", { owner: "entrius", repo: "allways-ui" }],
       ["loopover_get_repo_focus_manifest", { owner: "entrius", repo: "allways-ui" }],
+      ["loopover_get_selftune_override_audit", { owner: "entrius", repo: "allways-ui" }],
       ["loopover_get_pr_maintainer_packet", { owner: "entrius", repo: "allways-ui", number: 12 }],
       [
         "loopover_preview_local_pr_score",
