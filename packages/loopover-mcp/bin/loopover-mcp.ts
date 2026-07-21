@@ -1334,6 +1334,12 @@ const STDIO_TOOL_DESCRIPTORS = [
     description: "Set the autonomy level for one action class via a read-merge-write, so the other classes are left untouched. Same as `loopover-mcp maintain set-level <action> <level>`. Maintainer access required.",
   },
   {
+    name: "loopover_get_automation_state",
+    category: "agent",
+    description:
+      "Return a repo's agent automation state: the per-action autonomy levels, kill-switch / dry-run mode, GitHub write-permission readiness, and how many auto_with_approval actions are awaiting a maintainer decision. Same as `loopover-mcp maintain automation-state`. Maintainer access required.",
+  },
+  {
     name: "loopover_get_outcome_calibration",
     category: "maintainer",
     description: "Return slop-band and recommendation outcome calibration for a repo: whether higher-slop bands merge less often and how agent recommendations are panning out. Optionally bounded by windowDays. Maintainer-authenticated; measurement only.",
@@ -2655,6 +2661,23 @@ registerStdioTool(
     const autonomy = { ...(current.autonomy ?? {}), [action]: level };
     const payload = await apiFetch(`${base}/settings`, { method: "PUT", body: JSON.stringify({ autonomy }) });
     return toolResult(`Set ${action} autonomy to ${level} for ${owner}/${repo}.`, payload);
+  },
+);
+
+registerStdioTool(
+  "loopover_get_automation_state",
+  {
+    description: stdioToolDescription("loopover_get_automation_state"),
+    inputSchema: ownerRepoShape,
+  },
+  async ({ owner, repo }: any) => {
+    // Same GET {repoBase}/automation-state the `maintain automation-state` CLI subcommand already calls (#6742).
+    const payload = await apiGet(`${toolRepoBase(owner, repo)}/automation-state`);
+    const acting = payload.actingActionClasses ?? [];
+    return toolResult(
+      `Agent automation for ${owner}/${repo}: mode=${payload.mode}, ${acting.length} acting class(es), ${payload.pendingActionCount ?? 0} pending approval(s).`,
+      payload,
+    );
   },
 );
 
