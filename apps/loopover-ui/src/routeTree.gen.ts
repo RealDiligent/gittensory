@@ -67,6 +67,7 @@ import { Route as DocsAmsUnattendedSchedulingRouteImport } from './routes/docs.a
 import { Route as DocsAmsSizingRouteImport } from './routes/docs.ams-sizing'
 import { Route as DocsAmsOperationsRunbookRouteImport } from './routes/docs.ams-operations-runbook'
 import { Route as DocsAmsObservabilityRouteImport } from './routes/docs.ams-observability'
+import { Route as DocsAmsKillSwitchIncidentRouteImport } from './routes/docs.ams-kill-switch-incident'
 import { Route as DocsAmsGoalSpecRouteImport } from './routes/docs.ams-goal-spec'
 import { Route as DocsAmsFleetManifestRouteImport } from './routes/docs.ams-fleet-manifest'
 import { Route as DocsAmsEnvReferenceRouteImport } from './routes/docs.ams-env-reference'
@@ -397,6 +398,12 @@ const DocsAmsObservabilityRoute = DocsAmsObservabilityRouteImport.update({
   path: '/ams-observability',
   getParentRoute: () => DocsRoute,
 } as any)
+const DocsAmsKillSwitchIncidentRoute =
+  DocsAmsKillSwitchIncidentRouteImport.update({
+    id: '/ams-kill-switch-incident',
+    path: '/ams-kill-switch-incident',
+    getParentRoute: () => DocsRoute,
+  } as any)
 const DocsAmsGoalSpecRoute = DocsAmsGoalSpecRouteImport.update({
   id: '/ams-goal-spec',
   path: '/ams-goal-spec',
@@ -542,6 +549,7 @@ export interface FileRoutesByFullPath {
   '/docs/ams-env-reference': typeof DocsAmsEnvReferenceRoute
   '/docs/ams-fleet-manifest': typeof DocsAmsFleetManifestRoute
   '/docs/ams-goal-spec': typeof DocsAmsGoalSpecRoute
+  '/docs/ams-kill-switch-incident': typeof DocsAmsKillSwitchIncidentRoute
   '/docs/ams-observability': typeof DocsAmsObservabilityRoute
   '/docs/ams-operations-runbook': typeof DocsAmsOperationsRunbookRoute
   '/docs/ams-sizing': typeof DocsAmsSizingRoute
@@ -620,6 +628,7 @@ export interface FileRoutesByTo {
   '/docs/ams-env-reference': typeof DocsAmsEnvReferenceRoute
   '/docs/ams-fleet-manifest': typeof DocsAmsFleetManifestRoute
   '/docs/ams-goal-spec': typeof DocsAmsGoalSpecRoute
+  '/docs/ams-kill-switch-incident': typeof DocsAmsKillSwitchIncidentRoute
   '/docs/ams-observability': typeof DocsAmsObservabilityRoute
   '/docs/ams-operations-runbook': typeof DocsAmsOperationsRunbookRoute
   '/docs/ams-sizing': typeof DocsAmsSizingRoute
@@ -703,6 +712,7 @@ export interface FileRoutesById {
   '/docs/ams-env-reference': typeof DocsAmsEnvReferenceRoute
   '/docs/ams-fleet-manifest': typeof DocsAmsFleetManifestRoute
   '/docs/ams-goal-spec': typeof DocsAmsGoalSpecRoute
+  '/docs/ams-kill-switch-incident': typeof DocsAmsKillSwitchIncidentRoute
   '/docs/ams-observability': typeof DocsAmsObservabilityRoute
   '/docs/ams-operations-runbook': typeof DocsAmsOperationsRunbookRoute
   '/docs/ams-sizing': typeof DocsAmsSizingRoute
@@ -787,6 +797,7 @@ export interface FileRouteTypes {
     | '/docs/ams-env-reference'
     | '/docs/ams-fleet-manifest'
     | '/docs/ams-goal-spec'
+    | '/docs/ams-kill-switch-incident'
     | '/docs/ams-observability'
     | '/docs/ams-operations-runbook'
     | '/docs/ams-sizing'
@@ -865,6 +876,7 @@ export interface FileRouteTypes {
     | '/docs/ams-env-reference'
     | '/docs/ams-fleet-manifest'
     | '/docs/ams-goal-spec'
+    | '/docs/ams-kill-switch-incident'
     | '/docs/ams-observability'
     | '/docs/ams-operations-runbook'
     | '/docs/ams-sizing'
@@ -947,6 +959,7 @@ export interface FileRouteTypes {
     | '/docs/ams-env-reference'
     | '/docs/ams-fleet-manifest'
     | '/docs/ams-goal-spec'
+    | '/docs/ams-kill-switch-incident'
     | '/docs/ams-observability'
     | '/docs/ams-operations-runbook'
     | '/docs/ams-sizing'
@@ -1420,6 +1433,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsAmsObservabilityRouteImport
       parentRoute: typeof DocsRoute
     }
+    '/docs/ams-kill-switch-incident': {
+      id: '/docs/ams-kill-switch-incident'
+      path: '/ams-kill-switch-incident'
+      fullPath: '/docs/ams-kill-switch-incident'
+      preLoaderRoute: typeof DocsAmsKillSwitchIncidentRouteImport
+      parentRoute: typeof DocsRoute
+    }
     '/docs/ams-goal-spec': {
       id: '/docs/ams-goal-spec'
       path: '/ams-goal-spec'
@@ -1633,6 +1653,7 @@ interface DocsRouteChildren {
   DocsAmsEnvReferenceRoute: typeof DocsAmsEnvReferenceRoute
   DocsAmsFleetManifestRoute: typeof DocsAmsFleetManifestRoute
   DocsAmsGoalSpecRoute: typeof DocsAmsGoalSpecRoute
+  DocsAmsKillSwitchIncidentRoute: typeof DocsAmsKillSwitchIncidentRoute
   DocsAmsObservabilityRoute: typeof DocsAmsObservabilityRoute
   DocsAmsOperationsRunbookRoute: typeof DocsAmsOperationsRunbookRoute
   DocsAmsSizingRoute: typeof DocsAmsSizingRoute
@@ -1685,6 +1706,7 @@ const DocsRouteChildren: DocsRouteChildren = {
   DocsAmsEnvReferenceRoute: DocsAmsEnvReferenceRoute,
   DocsAmsFleetManifestRoute: DocsAmsFleetManifestRoute,
   DocsAmsGoalSpecRoute: DocsAmsGoalSpecRoute,
+  DocsAmsKillSwitchIncidentRoute: DocsAmsKillSwitchIncidentRoute,
   DocsAmsObservabilityRoute: DocsAmsObservabilityRoute,
   DocsAmsOperationsRunbookRoute: DocsAmsOperationsRunbookRoute,
   DocsAmsSizingRoute: DocsAmsSizingRoute,
