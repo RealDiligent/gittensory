@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.8.0](https://github.com/RealDiligent/gittensory/compare/mcp-v0.7.0...mcp-v0.8.0) (2026-07-21)
+
+
+### Features
+
+* **mcp-cli:** add `--format ndjson` streaming output for list-shaped commands ([#4228](https://github.com/RealDiligent/gittensory/issues/4228)) ([19d111a](https://github.com/RealDiligent/gittensory/commit/19d111a20497e8e5010b82a61e4b5128fd9f9114)), closes [#2232](https://github.com/RealDiligent/gittensory/issues/2232)
+* **mcp-cli:** add `maintain precision` subcommand for gate false-positive telemetry ([#4221](https://github.com/RealDiligent/gittensory/issues/4221)) ([07207a7](https://github.com/RealDiligent/gittensory/commit/07207a7fedea543fffe39d73494bc0c30ff1c3b1)), closes [#2227](https://github.com/RealDiligent/gittensory/issues/2227)
+* **mcp-cli:** add maintain queue to list pending actions ([#4226](https://github.com/RealDiligent/gittensory/issues/4226)) ([b646b8a](https://github.com/RealDiligent/gittensory/commit/b646b8a7417388b562ecdf351b95c521b96df243))
+* **mcp-cli:** add stdio gittensory_get_maintainer_noise proxy ([#4232](https://github.com/RealDiligent/gittensory/issues/4232)) ([93e6afb](https://github.com/RealDiligent/gittensory/commit/93e6afbbeda5de132cf7640847c7a0bc7a22a702))
+* **mcp-cli:** add tools command listing stdio tool descriptors ([#4225](https://github.com/RealDiligent/gittensory/issues/4225)) ([54dc362](https://github.com/RealDiligent/gittensory/commit/54dc3620aa5200011a92cb7bdbcfbea74848c1a6))
+* **mcp-cli:** register gittensory_get_upstream_drift stdio proxy tool ([#4216](https://github.com/RealDiligent/gittensory/issues/4216)) ([f3507d0](https://github.com/RealDiligent/gittensory/commit/f3507d07fb521aac9e5d78a7151bbc47ab940845)), closes [#2238](https://github.com/RealDiligent/gittensory/issues/2238)
+* **mcp:** add gittensory_validate_config tool for .gittensory.yml ([#4049](https://github.com/RealDiligent/gittensory/issues/4049)) ([590d52c](https://github.com/RealDiligent/gittensory/commit/590d52cdbce09930a821089b8b16b144d16b585f))
+* **mcp:** compose preflight, slop-risk, and pr-text-lint into review-pr ([#3791](https://github.com/RealDiligent/gittensory/issues/3791)) ([2fa43bb](https://github.com/RealDiligent/gittensory/commit/2fa43bb6695c8fd1af82671ff8983a8377c862b7))
+
+
+### Fixes
+
+* **mcp:** map review preflight status ([#3972](https://github.com/RealDiligent/gittensory/issues/3972)) ([0b6bc4b](https://github.com/RealDiligent/gittensory/commit/0b6bc4b17e3e61a94a66edaff6d1f34aab8e03e9))
+* **mcp:** sanitize validate-config terminal output ([#4090](https://github.com/RealDiligent/gittensory/issues/4090)) ([a844972](https://github.com/RealDiligent/gittensory/commit/a84497294fcfa4c3944ac222ef5da443be20d684))
+* **release:** sync package-lock.json via script, not release-please extra-files ([#4179](https://github.com/RealDiligent/gittensory/issues/4179)) ([b614317](https://github.com/RealDiligent/gittensory/commit/b614317e506fab3b30bf7fc366d67e268952ba02))
+* **signals:** exclude generated Dart from code scoring ([#3724](https://github.com/RealDiligent/gittensory/issues/3724)) ([1abcd71](https://github.com/RealDiligent/gittensory/commit/1abcd71add03648a6c0ea282678e8419efd3f9b4))
+
+## Changelog
+
 ## mcp-v0.7.0 - 2026-07-08
 
 ### Features
