@@ -36,6 +36,7 @@ import { isTestPath } from "../signals/test-evidence";
 import { nowIso } from "../utils/json";
 import { LOOPOVER_GATE_CHECK_NAME } from "../review/check-names";
 import { CLA_CHECK_UNRESOLVED_CODE, CLA_CONSENT_MISSING_CODE } from "../review/cla-check";
+import { createSignalStore } from "../review/signal-tracking-wire";
 import { REVIEW_THREAD_BLOCKER_CODE } from "../review/review-thread-findings";
 import { labelMatchesPattern } from "../scoring/preview";
 
@@ -163,6 +164,26 @@ export type GateCheckEvaluation = {
 // green-CI refutation path is intentionally disabled, so these still block when `aiReviewGateMode` is `block`.
 // `ai_review_inconclusive` is deliberately EXCLUDED — that is a "could not review" HOLD, not a false defect.
 export const AI_JUDGMENT_BLOCKER_CODES = new Set<string>(["ai_consensus_defect", "ai_review_split"]);
+
+/** Every finding code {@link isConfiguredGateBlocker} recognizes -- one branch per entry, in the function's
+ *  own order. Exported for the calibration reversal hook (#8104, outcomes-wire.ts), which must check exactly
+ *  the codes that can carry gate authority and no others; the parity test in gate-check-policy.test.ts pins
+ *  this list to the function's actual behavior so the two can never silently drift. */
+export const CONFIGURED_GATE_BLOCKER_CODES: readonly string[] = [
+  "missing_linked_issue",
+  "duplicate_pr_risk",
+  ...AI_JUDGMENT_BLOCKER_CODES,
+  REVIEW_THREAD_BLOCKER_CODE,
+  "secret_leak",
+  "pre_merge_check_required",
+  "manifest_missing_tests",
+  "manifest_linked_issue_required",
+  "self_authored_linked_issue",
+  "linked_issue_scope_mismatch",
+  "content_lane_deliverable_missing",
+  "lockfile_tamper_risk",
+  CLA_CONSENT_MISSING_CODE,
+];
 
 /** True when the gate FAILED *solely* because of AI-judgment blockers (every blocker is an AI-judgment code).
  *  An empty blocker list is NOT an AI-judgment-only failure. PURE. */
@@ -586,14 +607,17 @@ function promoteAdvisoryToBlock(policy: GateCheckPolicy): GateCheckPolicy {
 /** Public entry. In normal mode this is exactly `evaluateGateCheckCore`. In dry-run mode (#gate-dryrun) it ALSO runs
  *  the core eval with advisory sub-gates promoted to block and attaches that as `displayConclusion` — the would-be
  *  merge/close/manual verdict — while the POSTED `conclusion` stays the real, non-enforcing one. */
-export function evaluateGateCheck(advisoryResult: Advisory, policy: GateCheckPolicy = {}): GateCheckEvaluation {
-  const result = evaluateGateCheckCore(advisoryResult, policy);
+export function evaluateGateCheck(advisoryResult: Advisory, policy: GateCheckPolicy = {}, env?: Env): GateCheckEvaluation {
+  const result = evaluateGateCheckCore(advisoryResult, policy, env);
   if (!policy.dryRun) return result;
+  // The dry-run would-be evaluation deliberately gets NO env: it is a hypothetical (advisory sub-gates
+  // promoted to block), and recording its blockers as fired signals would poison the calibration history
+  // with decisions that never carried real gate authority (#8104).
   const wouldBe = evaluateGateCheckCore(advisoryResult, promoteAdvisoryToBlock(policy));
   return { ...result, displayConclusion: wouldBe.conclusion };
 }
 
-function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy = {}): GateCheckEvaluation {
+function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy = {}, env?: Env): GateCheckEvaluation {
   const warnings = advisoryResult.findings.filter((finding) => finding.severity === "warning");
   // App/infra state (repo not synced yet, PR not cached): loopover cannot evaluate this PR yet, so the
   // gate is NEUTRAL (non-blocking) and re-evaluates automatically on the next sync/webhook. Never block a
@@ -612,6 +636,27 @@ function evaluateGateCheckCore(advisoryResult: Advisory, policy: GateCheckPolicy
   // pass/fail. Readiness/quality stays advisory-only.
   const effective = applyMergeReadinessGate(policy);
   const configuredBlockers = advisoryResult.findings.filter((finding) => isConfiguredGateBlocker(finding, effective));
+  // #8104: every configured blocker except linked_issue_scope_mismatch records a fired signal in the shared
+  // calibration module (#7982) -- that one code is recorded at its own upstream push site (#8101), and
+  // recording it here too would double-count its history. Only live callers pass `env` (tests and pure
+  // consumers omit it -> byte-identical evaluation, nothing recorded). Fire-and-forget with
+  // .catch(() => undefined), per SignalStore's never-fail-the-review contract: a recording failure must
+  // never affect this evaluation's return value or any downstream gate decision.
+  if (env && advisoryResult.repoFullName && advisoryResult.pullNumber !== undefined) {
+    const signalTargetKey = `${advisoryResult.repoFullName}#${advisoryResult.pullNumber}`;
+    for (const finding of configuredBlockers) {
+      if (finding.code === "linked_issue_scope_mismatch") continue;
+      void createSignalStore(env)
+        .recordRuleFired({
+          ruleId: finding.code,
+          targetKey: signalTargetKey,
+          outcome: finding.severity ?? "blocker",
+          occurredAt: nowIso(),
+          ...(finding.confidence !== undefined ? { metadata: { confidence: finding.confidence } } : {}),
+        })
+        .catch(() => undefined);
+    }
+  }
   const qualityWarning = buildQualityGateWarning(effective);
   const slopBlocker = buildSlopGateBlocker(effective);
   const blockers = [...configuredBlockers, ...(slopBlocker ? [slopBlocker] : [])];

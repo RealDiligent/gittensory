@@ -1557,6 +1557,7 @@ export async function sweepRepoRegate(
     const gate = evaluateGateCheck(
       advisory,
       gateCheckPolicy(settings, null, undefined, pr.slopRisk ?? null),
+      env,
     );
     verdicts[String(pr.number)] = gate.conclusion;
     if (gate.conclusion === "failure" || gate.conclusion === "action_required")
@@ -10296,7 +10297,7 @@ async function maybePublishPrPublicSurface(
         // #2852: computed whenever the check-run publishes OR autonomous merge/close needs a conclusion to act
         // on — this is the actual gate CONCLUSION, independent of whether anything gets published to GitHub.
         let evaluation = shouldEvaluateGate
-          ? evaluateGateCheck(advisory, gatePolicy)
+          ? evaluateGateCheck(advisory, gatePolicy, env)
           : undefined;
         // Deterministic content/registry surface lane (#1255) — flag-gated + per-repo allowlist, byte-identical when
         // off (evaluateWithSurfaceLane returns the generic evaluation unchanged and resolves no files). A metagraphed
@@ -11763,7 +11764,7 @@ async function maybeProcessResolveCommand(env: Env, deliveryId: string, payload:
   if (!findingRef.ok) { await recordAuditEvent(env, { eventType: "github_app.finding_resolved_skipped", actor: req.actor, targetKey, outcome: "completed", detail: findingRef.reason, metadata: { deliveryId, repoFullName: req.repoFullName, reason: findingRef.reason } }); await recordGithubProductUsage(env, "finding_resolved_skipped", { actor: req.actor, repoFullName: req.repoFullName, targetKey, outcome: "skipped", metadata: { reason: findingRef.reason } }); return true; }
   const { advisory } = await buildAuthorizedPrActionAdvisory(env, req.repoFullName, pr, settings);
   await appendPublishedAiReviewFindingsForResolve(env, req.repoFullName, pr, settings.aiReviewMode, advisory);
-  const gate = evaluateGateCheck(advisory, gateCheckPolicy(settings, null, undefined, pr.slopRisk ?? null));
+  const gate = evaluateGateCheck(advisory, gateCheckPolicy(settings, null, undefined, pr.slopRisk ?? null), env);
   const selection = selectWarningsForResolve(gate.warnings, findingRef);
   if (selection.reason === "finding_not_found") { await recordAuditEvent(env, { eventType: "github_app.finding_resolved_skipped", actor: req.actor, targetKey, outcome: "completed", detail: selection.reason, metadata: { deliveryId, repoFullName: req.repoFullName, reason: selection.reason } }); await recordGithubProductUsage(env, "finding_resolved_skipped", { actor: req.actor, repoFullName: req.repoFullName, targetKey, outcome: "skipped", metadata: { reason: selection.reason } }); return true; }
   const mode = resolveAgentActionMode({ globalPaused: isGlobalAgentPause(env) || (await isGlobalAgentFrozen(env)), agentPaused: settings.agentPaused, agentDryRun: settings.agentDryRun });
@@ -11994,7 +11995,7 @@ async function maybeProcessExplainCommand(env: Env, deliveryId: string, payload:
   }
   const { advisory } = await buildAuthorizedPrActionAdvisory(env, req.repoFullName, pr, settings);
   await appendPublishedAiReviewFindingsForResolve(env, req.repoFullName, pr, settings.aiReviewMode, advisory);
-  const gate = evaluateGateCheck(advisory, gateCheckPolicy(settings, null, undefined, pr.slopRisk ?? null));
+  const gate = evaluateGateCheck(advisory, gateCheckPolicy(settings, null, undefined, pr.slopRisk ?? null), env);
   const selection = selectWarningsForResolve(gate.warnings, findingRef);
   if (selection.reason === "finding_not_found") {
     const notFound = sanitizePublicComment([AGENT_COMMAND_COMMENT_MARKER, "", "> [!NOTE]", `> **No review finding \`${findingRef.findingCode}\` on this PR**`, "> That id is not among this PR's current review findings — re-run `@loopover explain <finding-id>` with an id from the review summary.", "", "---", loopoverFooter(env)].join("\n"));

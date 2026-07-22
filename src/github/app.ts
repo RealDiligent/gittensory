@@ -740,7 +740,7 @@ export async function createOrUpdateGateCheckRun(
   // lane can OVERRIDE the generic verdict (surface_lane_reject → failure, surface_lane_manual → neutral),
   // and re-deriving here via evaluateGateCheck would discard that override — publishing a GREEN check while the
   // PR is actually auto-closed/held. Callers without a surface lane omit `gate` and re-derive as before (identical).
-  const gate = options.gate ?? evaluateGateCheck(advisory, policy);
+  const gate = options.gate ?? evaluateGateCheck(advisory, policy, env);
   return createOrUpdateNamedCheckRun(
     env,
     installationId,

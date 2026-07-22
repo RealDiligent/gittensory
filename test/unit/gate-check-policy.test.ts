@@ -4,7 +4,10 @@ import { clearInstallationTokenCacheForTest } from "../../src/github/app";
 import { buildAuthorizedPrActionAdvisory, gateCheckPolicy, resolveAiReviewCadence, resolveLinkedIssueAuthorLogins, shouldCollectLinkedIssueEvidence, shouldCollectSlopEvidence, shouldRefreshFilesForPreMergeChecks, shouldRunSlopAiAdvisory } from "../../src/queue/processors";
 import { createTestEnv } from "../helpers/d1";
 import { upsertIssueFromGitHub, upsertRepositoryFromGitHub } from "../../src/db/repositories";
-import { evaluateGateCheck } from "../../src/rules/advisory";
+import { CONFIGURED_GATE_BLOCKER_CODES, evaluateGateCheck } from "../../src/rules/advisory";
+import { CLA_CONSENT_MISSING_CODE } from "../../src/review/cla-check";
+import * as signalTrackingWire from "../../src/review/signal-tracking-wire";
+import { createSignalStore } from "../../src/review/signal-tracking-wire";
 import { REVIEW_THREAD_BLOCKER_CODE } from "../../src/review/review-thread-findings";
 import { parseFocusManifest, resolveEffectiveSettings } from "../../src/signals/focus-manifest";
 import { upsertRepoFocusManifest } from "../../src/signals/focus-manifest-loader";
@@ -1049,5 +1052,132 @@ describe("dry-run disposition (#gate-dryrun): would-be verdict without enforcing
   it("resolveEffectiveSettings maps gate.dryRun → gateDryRun", () => {
     const eff = resolveEffectiveSettings(settings({}), parseFocusManifest({ gate: { dryRun: true } }));
     expect(eff.gateDryRun).toBe(true);
+  });
+});
+
+// ── #8104: generic fired-signal recording at the configuredBlockers site ────────────────────────────────────
+
+describe("evaluateGateCheck — calibration fired-signal recording (#8104)", () => {
+  function signalAdvisory(findings: Advisory["findings"]): Advisory {
+    return { ...missingIssueAdvisory(), findings };
+  }
+  const finding = (code: string, extra: Record<string, unknown> = {}) =>
+    ({ code, title: code, severity: "warning", detail: "d", action: "a", ...extra }) as Advisory["findings"][number];
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  it("records a fired signal for every non-excluded configured blocker — AI codes with confidence metadata, deterministic codes without", async () => {
+    const env = createTestEnv();
+    evaluateGateCheck(
+      signalAdvisory([
+        finding("ai_consensus_defect", { confidence: 0.87 }),
+        finding("ai_review_split", { confidence: 0.71 }),
+        finding("secret_leak"),
+      ]),
+      { aiReviewGateMode: "block" },
+      env,
+    );
+    await vi.waitFor(async () => {
+      expect((await createSignalStore(env).queryRuleHistory("ai_consensus_defect", 0)).fired).toHaveLength(1);
+      expect((await createSignalStore(env).queryRuleHistory("ai_review_split", 0)).fired).toHaveLength(1);
+      expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toHaveLength(1);
+    });
+    const consensus = (await createSignalStore(env).queryRuleHistory("ai_consensus_defect", 0)).fired[0];
+    expect(consensus).toMatchObject({ targetKey: "owner/repo#7", outcome: "warning", metadata: { confidence: 0.87 } });
+    const secret = (await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired[0];
+    expect(secret?.metadata).toBeUndefined(); // no confidence -> metadata omitted entirely
+  });
+
+  it("falls back to outcome 'blocker' for a finding arriving without a severity (defensive ?? branch)", async () => {
+    const env = createTestEnv();
+    // AdvisoryFinding types severity as required, but the recording payload is spec-pinned to
+    // `finding.severity ?? "blocker"` -- exercise the fallback against a runtime finding that lacks it.
+    const severityless = { ...finding("secret_leak"), severity: undefined } as unknown as Advisory["findings"][number];
+    evaluateGateCheck(signalAdvisory([severityless]), {}, env);
+    await vi.waitFor(async () => {
+      expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toMatchObject([{ outcome: "blocker" }]);
+    });
+  });
+
+  it("records NOTHING for linked_issue_scope_mismatch even when it is a configured blocker (#8101 owns that code)", async () => {
+    const env = createTestEnv();
+    const evaluation = evaluateGateCheck(
+      signalAdvisory([finding("linked_issue_scope_mismatch"), finding("secret_leak")]),
+      { linkedIssueSatisfactionGateMode: "block" },
+      env,
+    );
+    expect(evaluation.blockers.map((b) => b.code)).toContain("linked_issue_scope_mismatch"); // it IS a blocker...
+    await vi.waitFor(async () => {
+      expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toHaveLength(1);
+    });
+    // ...but its signal history stays empty here — recorded only at #8101's own upstream push site.
+    expect((await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0)).fired).toEqual([]);
+  });
+
+  it("records NOTHING for a finding isConfiguredGateBlocker rejects, and nothing at all without env", async () => {
+    const env = createTestEnv();
+    // linkedIssueGateMode defaults to advisory -> missing_linked_issue is NOT a configured blocker here.
+    evaluateGateCheck(signalAdvisory([finding("missing_linked_issue")]), {}, env);
+    // env omitted entirely -> the recording block is skipped even for a real blocker.
+    evaluateGateCheck(signalAdvisory([finding("secret_leak")]), {});
+    await flush();
+    expect((await createSignalStore(env).queryRuleHistory("missing_linked_issue", 0)).fired).toEqual([]);
+    expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toEqual([]);
+  });
+
+  it("records NOTHING when the advisory has no pullNumber to build a target key from", async () => {
+    const env = createTestEnv();
+    const { pullNumber: _dropped, ...advisory } = signalAdvisory([finding("secret_leak")]);
+    evaluateGateCheck(advisory as Advisory, {}, env);
+    await flush();
+    expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toEqual([]);
+  });
+
+  it("dry-run mode records each real blocker once — the promoted would-be evaluation never records", async () => {
+    const env = createTestEnv();
+    evaluateGateCheck(signalAdvisory([finding("secret_leak")]), { dryRun: true }, env);
+    await vi.waitFor(async () => {
+      expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toHaveLength(1);
+    });
+    await flush();
+    expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).fired).toHaveLength(1); // still exactly one
+  });
+
+  it("degrades silently when the SignalStore write rejects: the evaluation itself is unaffected", async () => {
+    vi.spyOn(signalTrackingWire, "createSignalStore").mockReturnValue({
+      recordRuleFired: async () => {
+        throw new Error("signal store down");
+      },
+      recordHumanOverride: async () => undefined,
+      queryRuleHistory: async () => ({ fired: [], overrides: [] }),
+    });
+    const evaluation = evaluateGateCheck(signalAdvisory([finding("secret_leak")]), {}, createTestEnv());
+    expect(evaluation.conclusion).toBe("failure");
+    expect(evaluation.blockers.map((b) => b.code)).toEqual(["secret_leak"]);
+    await flush(); // the rejected write settles without surfacing anywhere
+    vi.restoreAllMocks();
+  });
+
+  it("PARITY: every CONFIGURED_GATE_BLOCKER_CODES entry actually blocks under its opt-in policy (anti-drift)", () => {
+    const policyFor: Record<string, Record<string, unknown>> = {
+      missing_linked_issue: { linkedIssueGateMode: "block" },
+      duplicate_pr_risk: {},
+      ai_consensus_defect: { aiReviewGateMode: "block" },
+      ai_review_split: { aiReviewGateMode: "block" },
+      [REVIEW_THREAD_BLOCKER_CODE]: {},
+      secret_leak: {},
+      pre_merge_check_required: {},
+      manifest_missing_tests: { manifestPolicyGateMode: "block" },
+      manifest_linked_issue_required: { manifestPolicyGateMode: "block" },
+      self_authored_linked_issue: { selfAuthoredLinkedIssueGateMode: "block" },
+      linked_issue_scope_mismatch: { linkedIssueSatisfactionGateMode: "block" },
+      content_lane_deliverable_missing: { contentLaneDeliverableGateMode: "block" },
+      lockfile_tamper_risk: { lockfileIntegrityGateMode: "block" },
+      [CLA_CONSENT_MISSING_CODE]: { claGateMode: "block" },
+    };
+    expect(Object.keys(policyFor).sort()).toEqual([...CONFIGURED_GATE_BLOCKER_CODES].sort());
+    for (const code of CONFIGURED_GATE_BLOCKER_CODES) {
+      const evaluation = evaluateGateCheck(signalAdvisory([finding(code, { confidence: 0.99 })]), policyFor[code]!);
+      expect(evaluation.blockers.map((b) => b.code), `code ${code} must block under its opt-in policy`).toContain(code);
+    }
   });
 });

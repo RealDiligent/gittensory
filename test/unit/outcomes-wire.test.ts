@@ -1382,6 +1382,21 @@ describe("recordReversalSignals — linked_issue_scope_mismatch override (#8101)
     expect(history.overrides[0]).toMatchObject({ ruleId: RULE, targetKey: "owner/repo#7", verdict: "reversed" });
   });
 
+  it("records a 'reversed' override for EVERY non-excluded blocker code that fired against the target in one reversal (#8104)", async () => {
+    const env = createTestEnv();
+    await seedBotAction(env, "owner/repo#7", "close");
+    // Two DIFFERENT rules fired against the same target -- the generalized loop must reverse both.
+    await createSignalStore(env).recordRuleFired({ ruleId: "secret_leak", targetKey: "owner/repo#7", outcome: "warning", occurredAt: new Date().toISOString() });
+    await createSignalStore(env).recordRuleFired({ ruleId: "duplicate_pr_risk", targetKey: "owner/repo#7", outcome: "warning", occurredAt: new Date().toISOString() });
+
+    await recordReversalSignals(env, "pull_request", contributorReopen());
+
+    expect((await createSignalStore(env).queryRuleHistory("secret_leak", 0)).overrides).toMatchObject([{ targetKey: "owner/repo#7", verdict: "reversed" }]);
+    expect((await createSignalStore(env).queryRuleHistory("duplicate_pr_risk", 0)).overrides).toMatchObject([{ targetKey: "owner/repo#7", verdict: "reversed" }]);
+    // A code that never fired for this target stays untouched.
+    expect((await createSignalStore(env).queryRuleHistory("missing_linked_issue", 0)).overrides).toEqual([]);
+  });
+
   it("records NO override when the reversal target has no prior fired event for this rule", async () => {
     const env = createTestEnv();
     await seedBotAction(env, "owner/repo#7", "close");
