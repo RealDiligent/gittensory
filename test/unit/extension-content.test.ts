@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { Script, createContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { buildOpenApiSpec } from "../../src/openapi/spec";
 
 const contentScript = readFileSync("apps/loopover-extension/content.js", "utf8");
 const manifest = JSON.parse(readFileSync("apps/loopover-extension/manifest.json", "utf8")) as {
@@ -34,6 +35,18 @@ describe("extension content script", () => {
       pullNumber: 146,
     });
     expect(internals.matchGitHubPageTarget("/JSONbored/loopover")).toBeNull();
+  });
+
+  // Extension ↔ backend drift guard (#8023): content.js's overlay request is only useful while the
+  // message type it sends is one background.js actually routes, and while the backend still serves the
+  // pull-context endpoint that route resolves to. Anchoring both here (this suite's subject is
+  // content.js) also gives this suite real instrumented-source coverage, which the scoped CI shard's
+  // non-empty-lcov verification requires of every selected test file.
+  it("sends a message type background.js routes, backed by a live pull-context endpoint in the API contract", () => {
+    expect(contentScript).toContain('type: "loopover:pull-context"');
+    const backgroundScript = readFileSync("apps/loopover-extension/background.js", "utf8");
+    expect(backgroundScript).toContain('"loopover:pull-context"');
+    expect(buildOpenApiSpec().paths["/v1/extension/pull-context"]).toBeDefined();
   });
 
   it("renders private pull-context sections and escapes API text", () => {
