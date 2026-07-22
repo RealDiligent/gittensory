@@ -25,6 +25,7 @@
 
 import { recordAuditEvent } from "../db/repositories";
 import { createSignalStore } from "./signal-tracking-wire";
+import { AI_JUDGMENT_BLOCKER_CODES } from "../rules/advisory";
 import { tryEnqueueDecisionPackRebuild } from "../services/decision-pack";
 import { incr } from "../selfhost/metrics";
 import { loadRepoFocusManifest } from "../signals/focus-manifest-loader";
@@ -546,6 +547,31 @@ async function recordLinkedIssueScopeMismatchOverride(env: Env, targetId: string
   });
 }
 
+// #8123 (implements #8106's decision): an OWNER closing a PR that aiReviewLowConfidenceHold routed to
+// manual review is the first genuine positive-confirmation signal in this system -- the maintainer looked
+// at the sub-floor AI judgment and upheld it. Attribution is via the AI-judgment ruleIds themselves (the
+// only hold of the three with directly attributable codes): each AI_JUDGMENT_BLOCKER_CODES entry with a
+// fired event against this target in the 30-day lookback gets a "confirmed" HumanOverrideEvent. A merged
+// close never reaches here (that is the reversal side, #7985); a contributor close records nothing
+// (owner-only, mirroring recordReversalSignals's own owner-vs-contributor check). Callers attach
+// `.catch(() => undefined)`: a SignalStore failure must never affect the PR-close handling itself.
+const AI_JUDGMENT_CONFIRMATION_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function recordAiJudgmentHoldConfirmations(env: Env, targetId: string): Promise<void> {
+  const store = createSignalStore(env);
+  const sinceMs = Date.now() - AI_JUDGMENT_CONFIRMATION_LOOKBACK_MS;
+  for (const ruleId of AI_JUDGMENT_BLOCKER_CODES) {
+    const history = await store.queryRuleHistory(ruleId, sinceMs);
+    if (!history.fired.some((event) => event.targetKey === targetId)) continue;
+    await store.recordHumanOverride({
+      ruleId,
+      targetKey: targetId,
+      verdict: "confirmed",
+      occurredAt: nowIso(),
+    });
+  }
+}
+
 /**
  * Record a REVERSAL — a human overriding a loopover auto-action — into the eval/audit stores (the
  * ground-truth accuracy signal). Mirrors reviewbot recordReversalSignals (runtime.ts ~157/274):
@@ -617,6 +643,19 @@ export async function recordReversalSignals(
   // A merge — either it completes an owner's earlier rescue of a bot-closed PR (#7985), or it's a "Reverts
   // #N" PR undoing a DIFFERENT bot-merged PR. Both can apply to the SAME merge (a rescue is never also a
   // revert of itself — they key off different target PRs — so there is no double-counting risk).
+  // #8123: an UNMERGED close by the repo owner confirms the AI-judgment hold that routed this PR to
+  // manual review (see recordAiJudgmentHoldConfirmations above). A bot close is the system's own action,
+  // never a human judgment; a contributor close mirrors the reversal side's contributor exclusion.
+  if (payload.action === "closed" && !pr.merged_at) {
+    const ownerLogin = (repoFullName.split("/")[0] || "").toLowerCase();
+    const senderLogin = (payload.sender?.login || "").toLowerCase();
+    const senderIsOwner = !!ownerLogin && !!senderLogin && ownerLogin === senderLogin;
+    if (senderIsOwner && payload.sender?.type !== "Bot") {
+      await recordAiJudgmentHoldConfirmations(env, reviewAuditTargetId(repoFullName, pr.number)).catch(() => undefined);
+    }
+    return;
+  }
+
   if (payload.action === "closed" && Boolean(pr.merged_at)) {
     const targetId = reviewAuditTargetId(repoFullName, pr.number);
     if (await hasRecentOwnerReopenPendingReversal(env, targetId, OWNER_REOPEN_MERGE_WINDOW_MS)) {
