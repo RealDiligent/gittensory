@@ -214,6 +214,28 @@ describe("evaluateKnobDrift on the close-confidence knob (#8212)", () => {
     expect(evaluateKnobDrift(AI_KNOB, cases)).toBeNull();
   });
 
+  it("breaks an equidistant tie toward the tighter value and never considers a sub-hard-minimum candidate", () => {
+    // Custom knob: live 0.875 sits exactly between candidates 0.9 and 0.85 (tie -> tighter 0.9 tried first),
+    // and the 0.2 candidate below the 0.3 hard minimum must be filtered before evaluation entirely.
+    const tieKnob: LoosenableKnob = {
+      ...AI_KNOB,
+      knobId: "tie_probe",
+      candidates: [0.9, 0.85, 0.2],
+      hardMinimum: 0.3,
+    };
+    const cases: BacktestCase[] = [];
+    // 0.88-confidence REVERSED mass: live 0.875 misses them (false negatives), tighter 0.9 catches them.
+    for (const key of visibleKeys.slice(0, tieKnob.minVisibleCases + 6)) cases.push(aiCase(key, 0.88, "reversed"));
+    for (const key of heldOutKeys.slice(0, tieKnob.minHeldOutCases + 3)) cases.push(aiCase(key, 0.88, "reversed"));
+    cases.push(aiCase(visibleKeys[tieKnob.minVisibleCases + 10]!, 0.5, "reversed"));
+    cases.push(aiCase(heldOutKeys[tieKnob.minHeldOutCases + 6]!, 0.5, "reversed"));
+
+    const report = evaluateKnobDrift(tieKnob, cases, 0.875);
+    expect(report).not.toBeNull();
+    expect(report!.dominatingValue).toBe(0.9); // the equidistant tie prefers the tighter alternative
+    expect(report!.direction).toBe("tighter");
+  });
+
   it("is deterministic: the same corpus and live value always produce the same report", () => {
     expect(JSON.stringify(evaluateKnobDrift(AI_KNOB, aiLooseningFriendlyCorpus()))).toBe(
       JSON.stringify(evaluateKnobDrift(AI_KNOB, aiLooseningFriendlyCorpus())),
