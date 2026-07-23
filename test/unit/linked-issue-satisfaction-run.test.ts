@@ -476,9 +476,29 @@ describe("runLinkedIssueSatisfactionForAdvisory (processor wiring, #1961/#3906)"
         ruleId: "linked_issue_scope_mismatch",
         targetKey: "acme/widgets#7",
         outcome: "unaddressed",
-        metadata: { confidence: 0.9 },
+        // #8129: the metadata carries the same bounded raw context the assessment evaluated.
+        metadata: { confidence: 0.9, prTitle: pr.title, prBody: pr.body },
       });
+      expect(typeof history.fired[0]?.metadata?.issueText).toBe("string");
+      expect((history.fired[0]?.metadata?.issueText as string).length).toBeGreaterThan(0);
+      expect(typeof history.fired[0]?.metadata?.diff).toBe("string");
       expect(history.overrides).toEqual([]); // firing alone is never an override
+    });
+
+    it("truncates over-limit raw context to the module's own bounds in the fired metadata (#8129)", async () => {
+      // A >6000-char issue body: the recorded issueText must be cut to exactly MAX_ISSUE_TEXT_CHARS, and an
+      // absent PR body records as the empty string (the ?? "" side of the bound expression).
+      stubIssueFetch({ body: "x".repeat(7000) });
+      const run = vi.fn(async () => ({ response: satisfactionJson({ status: "unaddressed", confidence: 0.9 }) }));
+      const env = enabledEnv(run);
+      const { body: _noBody, ...prWithoutBody } = pr;
+      await runLinkedIssueSatisfactionForAdvisory(env, { mode: "live", settings: blockMode, advisory: advisory(), repoFullName: "acme/widgets", pr: prWithoutBody, author: "alice", files, confirmedContributor: true, installationId: 1 });
+
+      const history = await createSignalStore(env).queryRuleHistory("linked_issue_scope_mismatch", 0);
+      expect(history.fired).toHaveLength(1);
+      const metadata = history.fired[0]?.metadata as Record<string, unknown>;
+      expect((metadata.issueText as string).length).toBe(6000); // MAX_ISSUE_TEXT_CHARS, the module's own bound
+      expect(metadata.prBody).toBe("");
     });
 
     it("ADVISORY mode records NO fired signal for the same 'unaddressed' verdict (#8101 — no finding, no signal)", async () => {

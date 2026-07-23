@@ -267,6 +267,7 @@ import {
 import { aiReviewCacheInputFingerprint } from "../review/ai-review-cache-input";
 import { linkedIssueSatisfactionCacheInputFingerprint } from "../review/linked-issue-satisfaction-cache-input";
 import { createSignalStore } from "../review/signal-tracking-wire";
+import { MAX_BODY_CHARS, MAX_DIFF_CHARS, MAX_ISSUE_TEXT_CHARS } from "../services/linked-issue-satisfaction";
 import {
   AGENT_LABEL_NEEDS_REVIEW,
   downgradeCloseToHold,
@@ -7553,7 +7554,16 @@ export async function runLinkedIssueSatisfactionForAdvisory(
           targetKey: `${args.repoFullName}#${args.pr.number}`,
           outcome: result.result.status,
           occurredAt: nowIso(),
-          metadata: { confidence: result.result.confidence },
+          // #8129: capture the SAME bounded raw context the assessment evaluated (the module's own bound
+          // constants, reused not redefined) so the backtest primitives (#8082) can re-run a changed
+          // prompt/logic against the stored inputs -- not just re-score a confidence-floor change.
+          metadata: {
+            confidence: result.result.confidence,
+            issueText: issueText.slice(0, MAX_ISSUE_TEXT_CHARS),
+            prTitle: args.pr.title,
+            prBody: (args.pr.body ?? "").slice(0, MAX_BODY_CHARS),
+            diff: diff.slice(0, MAX_DIFF_CHARS),
+          },
         })
         .catch(() => undefined);
     }
