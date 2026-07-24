@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildMaintainerRecap, runMaintainerRecap, type MaintainerRecapRepoInput } from "../../src/services/maintainer-recap";
+import { buildDriftRecapSection } from "../../src/services/maintainer-recap-drift";
 import type { OutcomeCalibration } from "../../src/services/outcome-calibration";
 import type { RecapReport } from "../../src/types";
 import { createTestEnv } from "../helpers/d1";
@@ -229,7 +230,8 @@ describe("runMaintainerRecap (#2252 end-to-end orchestration)", () => {
     expect(result.skipped).toBe(false);
     if (result.skipped) return;
     expect(result.report.repos).toEqual([]);
-    expect(result.formatted).toContain("_No repositories in this window._");
+    // #8372: Per-repo is now rendered by buildPerRepoRecapSection, which emits its own zero-case line.
+    expect(result.formatted).toContain("No repo activity in the last 7 day(s).");
     expect(result.formatted).toContain("(n/a)");
   });
 
@@ -290,5 +292,55 @@ describe("runMaintainerRecap (#2252 end-to-end orchestration)", () => {
       expect(call.body.toLowerCase()).not.toMatch(/payout|\/users\/secret|\/root\/secrets/);
       expect(call.body).toMatch(/redacted/);
     }
+  });
+
+  it("#8372: still renders the digest when the routing-shadow audit read fails (fail-safe absent section)", async () => {
+    stubRecapChannelFetch();
+    // loadRoutingRecapSection documents itself as fail-safe to an absent section ("the recap must never
+    // break on a read blip"), but nothing exercised that arm — every other test has a working DB, so the
+    // section was always present. A throwing prepare() drives the catch and the absent-section path.
+    const base = envWithBothWebhooks();
+    const env = {
+      ...base,
+      DB: {
+        ...base.DB,
+        prepare: (sql: string) => {
+          // ONLY the routing-shadow SELECT -- a broader match would also break unrelated audit writes,
+          // whose throw would escape loadRoutingRecapSection's own try/catch.
+          if (sql.includes("SELECT metadata_json FROM audit_events")) throw new Error("audit read blip");
+          return (base.DB as unknown as { prepare: (s: string) => unknown }).prepare(sql);
+        },
+      },
+    } as unknown as Env;
+
+    const result = await runMaintainerRecap(env, {});
+    expect(result.skipped).toBe(false);
+    if (result.skipped) return;
+    // The digest still renders every unconditional section; only the routing-shadow section is absent.
+    expect(result.formatted).toContain("# Maintainer recap");
+    expect(result.formatted).toContain("## Calibration");
+    expect(result.formatted).toContain("## Gate outcomes");
+  });
+
+  it("#8372: forwards an optional configDrift through to the rendered digest (plumbing only)", async () => {
+    stubRecapChannelFetch();
+    const drift = buildDriftRecapSection({
+      generatedAt: "2026-07-08T00:00:00.000Z",
+      sentinelEnabled: true,
+      drifting: [],
+      cleanKnobs: 3,
+    });
+
+    const withDrift = await runMaintainerRecap(envWithBothWebhooks(), { configDrift: drift });
+    expect(withDrift.skipped).toBe(false);
+    if (withDrift.skipped) return;
+    expect(withDrift.formatted).toContain("## Config drift");
+    for (const line of drift.lines) expect(withDrift.formatted).toContain(line);
+
+    // Omitting the option keeps the pre-#8214 byte shape: no dangling drift header.
+    const withoutDrift = await runMaintainerRecap(envWithBothWebhooks(), {});
+    expect(withoutDrift.skipped).toBe(false);
+    if (withoutDrift.skipped) return;
+    expect(withoutDrift.formatted).not.toContain("## Config drift");
   });
 });

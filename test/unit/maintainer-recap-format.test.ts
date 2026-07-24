@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { formatMaintainerRecap } from "../../src/services/maintainer-recap";
+import { buildCalibrationRecapSection } from "../../src/services/maintainer-recap-calibration";
 import { buildDriftRecapSection } from "../../src/services/maintainer-recap-drift";
+import { buildGateOutcomesRecapSection } from "../../src/services/maintainer-recap-gate-outcomes";
+import { buildPerRepoRecapSection } from "../../src/services/maintainer-recap-per-repo";
 import type { RecapReport } from "../../src/types";
 
 const GEN = "2026-07-08T00:00:00.000Z";
@@ -38,7 +41,14 @@ describe("formatMaintainerRecap (#2240)", () => {
     expect(body).not.toContain("## Config drift");
     // Empty sections show a single fallback line instead of dangling under the header.
     expect(body).toContain("_No summary lines for this window._");
-    expect(body).toContain("_No repositories in this window._");
+    // #8372: the Per-repo section is now rendered by buildPerRepoRecapSection, which supplies its own
+    // documented zero-case line, so the composed digest shows that instead of the old inline fallback.
+    expect(body).toContain("No repo activity in the last 7 day(s).");
+    // #8372: calibration + gate-outcomes sections are unconditional and render their own zero-case text.
+    expect(body).toContain("## Calibration");
+    expect(body).toContain("- Reversals: 0");
+    expect(body).toContain("Nothing auto-acted in the last 7 day(s)");
+    expect(body).toContain("## Gate outcomes");
     // Null rate ⇒ the "n/a" arm.
     expect(body).toContain("- Gate false positives: 0/0 (n/a)");
     expect(body).toContain("- Repos: 0");
@@ -99,7 +109,9 @@ describe("formatMaintainerRecap (#2240)", () => {
     expect(body).toContain("- Gate false positives: 1/4 (25%)");
     expect(body).toContain("- Repos: 1");
     // Per-repo row rendered (non-empty section arm).
-    expect(body).toContain("acme/widgets — 5 reviewed, 3 merged, 2 closed, 1 gate false-positive(s), 1 override(s), 0 reversal(s)");
+    // #8372: canonical buildPerRepoRecapSection row format (sorted, capped, "(+N more)"-aware) replaces
+    // the inline duplicate this function used to hand-roll.
+    expect(body).toContain("acme/widgets: reviewed 5, merged 3, closed 2");
     // Clean summary line survives verbatim (redaction no-op arm).
     expect(body).toContain("- Normal recap line about resolved reviews.");
     // Arm 1: local path scrubbed to the placeholder, raw path gone.
@@ -130,4 +142,36 @@ describe("formatMaintainerRecap (#2240)", () => {
     expect(body.match(/- <redacted>/g)).toHaveLength(3);
     expect(body).not.toMatch(/\n{3,}/);
   });
+
+  it("#8372: wires the dedicated calibration + gate-outcomes builders into the composed digest", () => {
+    // Cross-check against the standalone builder unit tests' own expectations: the wired output must
+    // reproduce buildCalibrationRecapSection / buildGateOutcomesRecapSection byte-for-byte, not a
+    // re-hand-rolled approximation. These builders were fully implemented and tested but, before this
+    // change, never appeared in a delivered digest at all.
+    const report: RecapReport = {
+      ...emptyReport(),
+      repos: [
+        { repoFullName: "acme/widgets", reviewed: 5, merged: 3, closed: 2, gateFalsePositives: 1, gateOverrides: 1, reversals: 2 },
+      ],
+      totals: { reviewed: 5, merged: 3, closed: 2, blocked: 4, gateFalsePositives: 1, gateOverrides: 1, reversals: 2, gateFalsePositiveRate: 0.25 },
+    };
+    const body = formatMaintainerRecap(report);
+    const expectedCalibration = buildCalibrationRecapSection({ windowDays: report.windowDays, totals: report.totals });
+    const expectedGate = buildGateOutcomesRecapSection({ windowDays: report.windowDays, totals: report.totals });
+    const expectedPerRepo = buildPerRepoRecapSection({ windowDays: report.windowDays, repos: report.repos });
+
+    expect(body).toContain("## Calibration");
+    for (const line of expectedCalibration.lines) expect(body).toContain(line);
+    expect(body).toContain("## Gate outcomes");
+    for (const line of expectedGate.lines) expect(body).toContain(line);
+    for (const line of expectedPerRepo.lines) expect(body).toContain(line);
+
+    // Section ORDER: Summary, Totals, Per-repo, Calibration, Gate outcomes.
+    const at = (needle: string) => body.indexOf(needle);
+    expect(at("## Summary")).toBeLessThan(at("## Totals"));
+    expect(at("## Totals")).toBeLessThan(at("## Per-repo"));
+    expect(at("## Per-repo")).toBeLessThan(at("## Calibration"));
+    expect(at("## Calibration")).toBeLessThan(at("## Gate outcomes"));
+  });
+
 });
