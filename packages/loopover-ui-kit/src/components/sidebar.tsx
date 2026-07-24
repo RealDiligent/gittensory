@@ -102,10 +102,24 @@ const SidebarProvider = React.forwardRef<
 
     // Adds a keyboard shortcut to toggle the sidebar.
     React.useEffect(() => {
+      // Don't hijack Cmd/Ctrl+B (the native "Bold" shortcut) while the user is typing in a form
+      // field or contenteditable element -- mirrors the isTyping guard the app's other global keydown
+      // handlers already use (site/keyboard-shortcuts.tsx, site/app-shell.tsx).
+      const isTyping = (el: EventTarget | null) => {
+        if (!(el instanceof HTMLElement)) return false;
+        const tag = el.tagName;
+        return (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          el.isContentEditable
+        );
+      };
       const handleKeyDown = (event: KeyboardEvent) => {
         if (
           event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-          (event.metaKey || event.ctrlKey)
+          (event.metaKey || event.ctrlKey) &&
+          !isTyping(event.target)
         ) {
           event.preventDefault();
           toggleSidebar();
