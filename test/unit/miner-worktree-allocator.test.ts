@@ -180,3 +180,52 @@ describe("loopover-miner worktree allocator scaffolding (#4298)", () => {
     expect(cleanupResourceCount()).toBe(0);
   });
 });
+
+describe("WorktreeAllocator.purgeByRepo (#8320)", () => {
+  // Seed a stale non-null repo_full_name onto a FREE slot directly -- normal acquire/release never leaves
+  // one, so this bypasses the API to exercise the defensive backstop the purge exists for.
+  function seedFreeSlotRepo(dbPath: string, slotIndex: number, repoFullName: string): void {
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.prepare("UPDATE worktree_slots SET repo_full_name = ? WHERE slot_index = ? AND status = 'free'").run(repoFullName, slotIndex);
+    } finally {
+      db.close();
+    }
+  }
+
+  it("clears and counts a FREE slot carrying a stale repo_full_name, and never deletes the row", () => {
+    const allocator = tempAllocator({ maxConcurrency: 2 });
+    seedFreeSlotRepo(allocator.dbPath, 0, "acme/widgets");
+
+    expect(allocator.purgeByRepo("acme/widgets")).toBe(1);
+    // The row still EXISTS (fixed pool preserved) but its repo attribution is cleared.
+    const slots = allocator.listSlots();
+    expect(slots).toHaveLength(2);
+    expect(slots.every((slot) => slot.repoFullName === null)).toBe(true);
+    // Idempotent: a second purge finds nothing left.
+    expect(allocator.purgeByRepo("acme/widgets")).toBe(0);
+  });
+
+  it("leaves an ACTIVE slot for the target repo completely untouched and uncounted", () => {
+    const allocator = tempAllocator({ maxConcurrency: 2 });
+    const active = allocator.acquire("attempt-a", "acme/widgets");
+
+    expect(allocator.purgeByRepo("acme/widgets")).toBe(0);
+    // The live allocation is intact -- repo, attempt_id and status all preserved.
+    const slot = allocator.listSlots().find((entry) => entry.slotIndex === active.slotIndex);
+    expect(slot?.repoFullName).toBe("acme/widgets");
+    expect(slot?.attemptId).toBe("attempt-a");
+    expect(slot?.status).toBe("active");
+  });
+
+  it("returns 0 when no slot matches the repo", () => {
+    const allocator = tempAllocator({ maxConcurrency: 2 });
+    allocator.acquire("attempt-a", "acme/widgets");
+    expect(allocator.purgeByRepo("other/repo")).toBe(0);
+  });
+
+  it("rejects a malformed repo name (same guard as acquire)", () => {
+    const allocator = tempAllocator({ maxConcurrency: 1 });
+    expect(() => allocator.purgeByRepo("../evil")).toThrow("invalid_repo_full_name");
+  });
+});

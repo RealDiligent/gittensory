@@ -29,6 +29,7 @@ import { initContributionProfileCache, resolveContributionProfileCacheDbPath } f
 import type { ContributionProfileCache } from "./contribution-profile-cache.js";
 import { openGovernorState, resolveGovernorStateDbPath } from "./governor-state.js";
 import type { GovernorState } from "./governor-state.js";
+import { openWorktreeAllocator, resolveWorktreeAllocatorDbPath } from "./worktree-allocator.js";
 import { initPolicyVerdictCacheStore, resolvePolicyVerdictCacheDbPath } from "./policy-verdict-cache.js";
 import type { PolicyVerdictCacheStore } from "./policy-verdict-cache.js";
 import { initRankedCandidatesStore, resolveRankedCandidatesDbPath } from "./ranked-candidates.js";
@@ -79,7 +80,8 @@ type PurgeOpenerKey =
   | "initPolicyVerdictCacheStore"
   | "initRankedCandidatesStore"
   | "openReplaySnapshotStore"
-  | "initDenyHookSynthesisStore";
+  | "initDenyHookSynthesisStore"
+  | "openWorktreeAllocator";
 
 export type PurgeCliOptions = {
   openClaimLedger?: () => ClaimLedger;
@@ -94,6 +96,7 @@ export type PurgeCliOptions = {
   initRankedCandidatesStore?: () => RankedCandidatesStore;
   openReplaySnapshotStore?: () => ReplaySnapshotStore;
   initDenyHookSynthesisStore?: () => DenyHookSynthesisStore;
+  openWorktreeAllocator?: () => PurgeableStore;
   resolveDbPaths?: Record<string, () => string>;
 };
 
@@ -104,6 +107,10 @@ type PurgeTarget = {
   resolveDbPath: () => string;
   spec?: LedgerPurgeSpec;
   specs?: LedgerPurgeSpec[];
+  // A store whose purge condition is not a plain `table WHERE repoColumn = ?` (worktree-allocator: only a
+  // `status = 'free'` row is clearable) supplies its own read-only dry-run count instead of a spec, so the
+  // preview matches the store's own purgeByRepo match condition exactly.
+  countByRepo?: (db: DatabaseSync, repoFullName: string) => number;
 };
 
 const REAL_PURGE_TARGETS: PurgeTarget[] = [
@@ -124,6 +131,10 @@ const REAL_PURGE_TARGETS: PurgeTarget[] = [
   { name: "ranked-candidates", optionKey: "initRankedCandidatesStore", opener: initRankedCandidatesStore, resolveDbPath: resolveRankedCandidatesDbPath, spec: RANKED_CANDIDATES_PURGE_SPEC },
   { name: "replay-snapshot", optionKey: "openReplaySnapshotStore", opener: openReplaySnapshotStore, resolveDbPath: resolveReplaySnapshotDbPath, spec: REPLAY_SNAPSHOT_PURGE_SPEC },
   { name: "deny-hook-synthesis", optionKey: "initDenyHookSynthesisStore", opener: initDenyHookSynthesisStore, resolveDbPath: resolveDenyHookSynthesisDbPath, spec: DENY_HOOK_SYNTHESIS_PURGE_SPEC },
+  // worktree-allocator's worktree_slots is a FIXED slot pool, not a ledger (#8320): its purgeByRepo clears
+  // (never deletes) only a `status = 'free'` row, never touching a live active slot. It therefore carries a
+  // custom `countByRepo` instead of a generic `spec`, mirroring governor-state's own non-uniform entry above.
+  { name: "worktree-allocator", optionKey: "openWorktreeAllocator", opener: openWorktreeAllocator, resolveDbPath: resolveWorktreeAllocatorDbPath, countByRepo: (db, repoFullName) => Number((db.prepare("SELECT COUNT(*) AS count FROM worktree_slots WHERE status = 'free' AND repo_full_name = ?").get(repoFullName) as { count: number }).count) },
 ];
 
 export type ParsedPurgeArgs = { json: boolean; dryRun: boolean; repoFullName: string } | { error: string };
@@ -219,10 +230,13 @@ export function runPurgeDryRun(
     // A target scopes one table (`spec`) or -- for governor-state -- several in one file (`specs`); sum the
     // per-table counts against the single read-only handle so the preview matches what a real purge removes.
     // Every REAL_PURGE_TARGETS entry declares exactly one of the two, so `target.spec` is always set here.
-    const specs = target.specs ?? [target.spec!];
+    // A store may declare a generic spec/specs, OR a custom countByRepo (worktree-allocator, whose match
+    // condition is not expressible as a plain table+column spec). Exactly one is set per entry.
     try {
       const wouldPurge = countExistingRows(dbPath, (db) =>
-        specs.reduce((sum, spec) => sum + countStoreByRepo(db, spec, parsed.repoFullName), 0),
+        target.countByRepo
+          ? target.countByRepo(db, parsed.repoFullName)
+          : (target.specs ?? [target.spec!]).reduce((sum, spec) => sum + countStoreByRepo(db, spec, parsed.repoFullName), 0),
       );
       return { store: target.name, wouldPurge };
     } catch (error) {

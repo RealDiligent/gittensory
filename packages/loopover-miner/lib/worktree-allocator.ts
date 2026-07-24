@@ -38,6 +38,7 @@ export type WorktreeAllocator = {
   acquire(attemptId: string, repoFullName: string): WorktreeAllocation;
   release(attemptId: string): WorktreeAllocation | null;
   listSlots(): WorktreeAllocation[];
+  purgeByRepo(repoFullName: string): number;
   close(): void;
 };
 
@@ -357,6 +358,26 @@ export function openWorktreeAllocator(options: {
     },
     listSlots() {
       return (listSlots.all() as WorktreeSlotRow[]).map(rowToAllocation);
+    },
+    // Right-to-be-forgotten sweep (#5564/#8320). worktree_slots is a FIXED pool of maxConcurrency rows, not
+    // an append-only ledger, so it must never DELETE a row (that would break ensureSlots/selectFreeSlot's
+    // "every slot index exists" invariant) and must never touch an ACTIVE slot -- an active slot's
+    // repo_full_name reflects a live, in-flight attempt's on-disk worktree checkout, and blanking it would
+    // desync the allocator from that checkout. Only a `status = 'free'` row is cleared, mirroring
+    // release()/reclaimOrphanedAllocations()'s own blank-on-free UPDATE. Because every normal release/reclaim
+    // path already blanks these fields when freeing a slot, this UPDATE is EXPECTED to affect 0 rows in the
+    // overwhelming majority of real calls -- it is a defensive backstop for a row left stale by an
+    // unexpected crash path (or predating this fix).
+    purgeByRepo(repoFullName) {
+      const normalizedRepo = normalizeRepoFullName(repoFullName);
+      const result = db
+        .prepare(`
+          UPDATE worktree_slots
+          SET repo_full_name = NULL, attempt_id = NULL, owner_pid = NULL, owner_host = NULL, allocated_at = NULL
+          WHERE status = 'free' AND repo_full_name = ?
+        `)
+        .run(normalizedRepo);
+      return Number(result.changes);
     },
     close() {
       db.close();
