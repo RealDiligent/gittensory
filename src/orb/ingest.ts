@@ -35,17 +35,25 @@ export async function readOrbIngestBody(request: Request, contentLengthHeader: s
   const decoder = new TextDecoder();
   let total = 0;
   let out = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_ORB_INGEST_BODY_BYTES) {
-      await reader.cancel();
-      return null;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ORB_INGEST_BODY_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      out += decoder.decode(value, { stream: true });
     }
-    out += decoder.decode(value, { stream: true });
+    return out + decoder.decode();
+  } catch {
+    // The stream itself errored (dropped connection / network reset mid-read). Every caller already
+    // treats null identically to "reject this request", so degrade to the same clean rejection the
+    // oversized/malformed cases produce instead of letting the rejection escape to a framework 500 --
+    // mirrors readOrbRelayRegisterBody (relay.ts), fixed once here rather than at both call sites.
+    return null;
   }
-  return out + decoder.decode();
 }
 
 interface OrbIngestEvent {
