@@ -59,10 +59,10 @@ function moduleDir(): string {
 // single hardcoded relative depth can only ever be correct for one of those two contexts, so this
 // tries both, preferring whichever the current on-disk layout actually has -- robust to either
 // execution mode without needing to detect which one is active.
-function resolveMonorepoSiblingPath(...segments: string[]): string {
-  const fromLib = join(moduleDir(), "..", ...segments);
+function resolveMonorepoSiblingPath(dir: string, ...segments: string[]): string {
+  const fromLib = join(dir, "..", ...segments);
   if (existsSync(fromLib)) return fromLib;
-  return join(moduleDir(), "..", "..", ...segments);
+  return join(dir, "..", "..", ...segments);
 }
 
 const PACKAGE_NAME = "@loopover/miner";
@@ -172,16 +172,20 @@ export function readInstalledEnginePackageVersionFromPaths(
 }
 
 /** Installed @loopover/engine semver from node_modules (not the declared dependency range). */
-/* v8 ignore next -- Node resolver failure cannot be induced after this module's require is initialized; fallback is defensive */
-export function readInstalledEnginePackageVersion(): string | null {
+export function readInstalledEnginePackageVersion(
+  deps: { moduleDir?: () => string; resolveInstalledEntry?: () => string } = {},
+): string | null {
+  const dir = (deps.moduleDir ?? moduleDir)();
+  const resolveInstalledEntry = deps.resolveInstalledEntry ?? (() => requireFromHere().resolve(ENGINE_PACKAGE));
   try {
     return readInstalledEnginePackageVersionFromPaths(
-      requireFromHere().resolve(ENGINE_PACKAGE),
-      resolveMonorepoSiblingPath("..", "loopover-engine", "package.json"),
+      resolveInstalledEntry(),
+      resolveMonorepoSiblingPath(dir, "..", "loopover-engine", "package.json"),
     );
   } catch {
-    /* v8 ignore next 9 -- only reaches when Node cannot resolve the installed package at all */
-    const workspacePkg = join(moduleDir(), "../../loopover-engine/package.json");
+    // Reached when the installed-package resolve throws (Node cannot resolve @loopover/engine at all); still
+    // try the monorepo-sibling engine package.json at whichever depth the current on-disk layout has.
+    const workspacePkg = resolveMonorepoSiblingPath(dir, "..", "loopover-engine", "package.json");
     if (existsSync(workspacePkg)) {
       try {
         return (JSON.parse(readFileSync(workspacePkg, "utf8")) as PackageJsonShape).version ?? null;
@@ -217,10 +221,11 @@ export function readExpectedEnginePackageVersionFromPaths(
   }
 }
 
-export function readExpectedEnginePackageVersion(): string | null {
+export function readExpectedEnginePackageVersion(deps: { moduleDir?: () => string } = {}): string | null {
+  const dir = (deps.moduleDir ?? moduleDir)();
   return readExpectedEnginePackageVersionFromPaths(
-    join(moduleDir(), "../../loopover-engine/package.json"),
-    resolveMonorepoSiblingPath("expected-engine.version"),
+    resolveMonorepoSiblingPath(dir, "..", "loopover-engine", "package.json"),
+    resolveMonorepoSiblingPath(dir, "expected-engine.version"),
   );
 }
 

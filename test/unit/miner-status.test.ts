@@ -303,6 +303,55 @@ describe("loopover-miner status/doctor (#2288)", () => {
     ).toBeNull();
   });
 
+  it("REGRESSION (#8630): readExpectedEnginePackageVersion resolves the live monorepo engine package from a dist/lib-depth moduleDir", () => {
+    const root = tempRoot();
+    // Simulate the real compiled-CLI layout: moduleDir() = packages/loopover-miner/dist/lib. The monorepo engine
+    // package.json then sits three levels up (the dist-fallback depth), and the pin file two levels up. Pre-fix
+    // code hardcoded `moduleDir()/../../loopover-engine/package.json`, which from dist/lib points at the nonexistent
+    // packages/loopover-miner/dist/loopover-engine, so it silently fell back to the static pin instead of the live pkg.
+    const distLib = join(root, "packages", "loopover-miner", "dist", "lib");
+    const enginePkg = join(root, "packages", "loopover-engine", "package.json");
+    mkdirSync(dirname(enginePkg), { recursive: true });
+    writeFileSync(enginePkg, JSON.stringify({ version: "9.9.9" }));
+    const pin = join(root, "packages", "loopover-miner", "expected-engine.version");
+    mkdirSync(dirname(pin), { recursive: true });
+    writeFileSync(pin, "0.0.1\n");
+
+    expect(readExpectedEnginePackageVersion({ moduleDir: () => distLib })).toBe("9.9.9");
+
+    // not-found branch of the fixed call site: with no monorepo engine package, it falls through to the pin file.
+    rmSync(enginePkg);
+    expect(readExpectedEnginePackageVersion({ moduleDir: () => distLib })).toBe("0.0.1");
+  });
+
+  it("REGRESSION (#8630): readInstalledEnginePackageVersion's catch resolves the monorepo engine package from a dist/lib-depth moduleDir", () => {
+    const root = tempRoot();
+    const distLib = join(root, "packages", "loopover-miner", "dist", "lib");
+    const enginePkg = join(root, "packages", "loopover-engine", "package.json");
+    mkdirSync(dirname(enginePkg), { recursive: true });
+    // Force the installed-package resolve to throw so the catch-block workspace lookup (the fixed call site) runs.
+    const resolveInstalledEntry = () => {
+      throw new Error("Cannot find module '@loopover/engine'");
+    };
+
+    // found + valid: the sibling engine package.json at the dist-fallback depth is read. Pre-fix, the hardcoded
+    // `moduleDir()/../../loopover-engine/package.json` pointed at the absent dist/loopover-engine and returned null.
+    writeFileSync(enginePkg, JSON.stringify({ version: "8.8.8" }));
+    expect(readInstalledEnginePackageVersion({ moduleDir: () => distLib, resolveInstalledEntry })).toBe("8.8.8");
+
+    // found + no version field: nullish-coalesce yields null.
+    writeFileSync(enginePkg, "{}");
+    expect(readInstalledEnginePackageVersion({ moduleDir: () => distLib, resolveInstalledEntry })).toBeNull();
+
+    // found + unparseable: the inner catch returns null.
+    writeFileSync(enginePkg, "not-json");
+    expect(readInstalledEnginePackageVersion({ moduleDir: () => distLib, resolveInstalledEntry })).toBeNull();
+
+    // not-found: no sibling engine package at any depth -> null.
+    rmSync(enginePkg);
+    expect(readInstalledEnginePackageVersion({ moduleDir: () => distLib, resolveInstalledEntry })).toBeNull();
+  });
+
   it("reports credential and token availability across configured provider variants without exposing secrets", () => {
     expect(checkGitHubTokenPresent({ GITHUB_TOKEN: "present" }).ok).toBe(true);
     expect(checkCodingAgentCredential({ MINER_CODING_AGENT_PROVIDER: "noop" }).detail).toContain("needs no credential");
