@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/api/routes";
 import { createSessionForGitHubUser } from "../../src/auth/security";
-import { upsertInstallation, upsertRepositoryFromGitHub } from "../../src/db/repositories";
+import { upsertInstallation, upsertPullRequestFromGitHub, upsertRepositoryFromGitHub } from "../../src/db/repositories";
 import { createTestEnv } from "../helpers/d1";
 
 // The miner ⊕ maintainer access boundary, locked against regression.
@@ -126,6 +126,45 @@ describe("access boundary: per-repo maintainer data is repo-scoped", () => {
     const cookie = `loopover_session=${token}`;
     expect((await app.request("/v1/repos/alice/repo-a/registration-readiness", { headers: { cookie } }, env)).status).toBe(200);
     expect((await app.request("/v1/repos/alice/repo-a/gittensor-config-recommendation", { headers: { cookie } }, env)).status).toBe(200);
+  });
+
+  it("a maintainer REACHES automation-state on their OWN repo, scoped per-repo (#8653)", async () => {
+    const { app, env } = await setup();
+    const { token } = await createSessionForGitHubUser(env, { login: "alice", id: 101 });
+    const cookie = `loopover_session=${token}`;
+    // Before the fix this returned 403 insufficient_role at the session allowlist even though the handler's
+    // requireRepoMaintainer would admit a maintainer of their own repo.
+    expect((await app.request("/v1/repos/alice/repo-a/automation-state", { headers: { cookie } }, env)).status).toBe(200);
+    const other = await app.request("/v1/repos/bob/repo-b/automation-state", { headers: { cookie } }, env);
+    expect(other.status).toBe(403);
+    expect(await other.json()).toMatchObject({ error: "forbidden_repo" });
+  });
+
+  it("a maintainer REACHES ams-miner-cohort on their OWN repo, scoped per-repo (#8653)", async () => {
+    const { app, env } = await setup();
+    const { token } = await createSessionForGitHubUser(env, { login: "alice", id: 101 });
+    const cookie = `loopover_session=${token}`;
+    expect((await app.request("/v1/repos/alice/repo-a/ams-miner-cohort", { headers: { cookie } }, env)).status).toBe(200);
+    const other = await app.request("/v1/repos/bob/repo-b/ams-miner-cohort", { headers: { cookie } }, env);
+    expect(other.status).toBe(403);
+    expect(await other.json()).toMatchObject({ error: "forbidden_repo" });
+  });
+
+  it("a maintainer REACHES pulls/:number/chat-qa on their OWN repo, scoped per-repo (#8653)", async () => {
+    const { app, env } = await setup();
+    // Seed a PR so the handler gets past its pull_request_not_found guard; chatQa is off by default, so the
+    // real (unmocked) service returns a 200 { status: "disabled" } -- a 200 here proves the session cleared the
+    // allowlist AND requireRepoMaintainer, which is exactly what this regression covers.
+    await upsertPullRequestFromGitHub(env, "alice/repo-a", { number: 7, title: "t", state: "open", user: { login: "someone" }, labels: [], body: "b" });
+    const { token } = await createSessionForGitHubUser(env, { login: "alice", id: 101 });
+    const cookie = `loopover_session=${token}`;
+    const body = JSON.stringify({ question: "why is this blocked?" });
+    const headers = { cookie, "content-type": "application/json" };
+    expect((await app.request("/v1/repos/alice/repo-a/pulls/7/chat-qa", { method: "POST", headers, body }, env)).status).toBe(200);
+    // A maintainer of A cannot reach chat-qa on B: requireRepoMaintainer rejects before any PR lookup.
+    const other = await app.request("/v1/repos/bob/repo-b/pulls/7/chat-qa", { method: "POST", headers, body }, env);
+    expect(other.status).toBe(403);
+    expect(await other.json()).toMatchObject({ error: "forbidden_repo" });
   });
 });
 

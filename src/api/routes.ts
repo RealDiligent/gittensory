@@ -6114,6 +6114,13 @@ function canSessionAccessPath(env: Env, identity: Extract<AuthIdentity, { kind: 
   if (isRepoOutcomeCalibrationPath(path)) return true;
   if (isRepoGatePrecisionPath(path)) return true;
   if (isRepoMaintainerNoisePath(path)) return true;
+  // #8653: automation-state, ams-miner-cohort, and pulls/:number/chat-qa are maintainer-panel routes whose
+  // handlers each run requireRepoMaintainer to enforce per-repo authority (contributors -> 403 forbidden_repo);
+  // they were omitted from this coarse allowlist, so a real maintainer's browser session got 403 insufficient_role
+  // before the handler ran (chat-qa is the Chat Q&A panel's only data call).
+  if (isRepoAutomationStatePath(path)) return true;
+  if (isRepoAmsMinerCohortPath(path)) return true;
+  if (isRepoChatQaPath(path)) return true;
   if (isRepoSelftuneOverridesPath(path)) return true;
   if (isRepoSettingsPreviewPath(path)) return true;
   if (isRepoOnboardingPackPreviewPath(path)) return true;
@@ -6167,6 +6174,18 @@ function isRepoGatePrecisionPath(path: string): boolean {
 
 function isRepoMaintainerNoisePath(path: string): boolean {
   return /^\/v1\/repos\/[^/]+\/[^/]+\/maintainer-noise$/.test(path);
+}
+
+function isRepoAutomationStatePath(path: string): boolean {
+  return /^\/v1\/repos\/[^/]+\/[^/]+\/automation-state$/.test(path);
+}
+
+function isRepoAmsMinerCohortPath(path: string): boolean {
+  return /^\/v1\/repos\/[^/]+\/[^/]+\/ams-miner-cohort$/.test(path);
+}
+
+function isRepoChatQaPath(path: string): boolean {
+  return /^\/v1\/repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/chat-qa$/.test(path);
 }
 
 // #6168: let a browser (session) maintainer reach the self-tune override admin routes; the route's own
