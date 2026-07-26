@@ -2041,10 +2041,15 @@ export function derivePublicCommentMergeFacts(args: {
   mergeableState: string | null | undefined;
   authorLogin: string | null | undefined;
   liveCi: Pick<LiveCiAggregate, "ciState" | "failingDetails" | "nonRequiredFailingDetails">;
-  settings: Pick<RepositorySettings, "hardGuardrailGlobs" | "hardGuardrailGlobsOverridesInvariants" | "manualReviewLabel">;
+  settings: Pick<RepositorySettings, "hardGuardrailGlobs" | "hardGuardrailGlobsOverridesInvariants" | "manualReviewLabel" | "closeOwnerAuthors">;
   unifiedFiles: Awaited<ReturnType<typeof listPullRequestFiles>>;
   repoFullName: string;
   prLabels: readonly string[];
+  // Whether the PR author is a per-repo admin (non-owner). This function is sync, so the caller resolves it once
+  // (isPerTenantAdmin, a DB/API call) and passes it in. Defaults to false, degrading to the owner-only check for
+  // a caller that doesn't resolve it -- but the real caller MUST pass it so admin authors match the planner's
+  // close-eligibility formula the same as the repo owner (#8683).
+  authorIsAdmin?: boolean;
   // Optional so a self-hoster's PROTECTED_AUTOCLOSE_AUTHORS_EXTRA allowlist extension reaches neverClosed
   // (#8645). Callers that already hold `env` MUST pass it; omitted only keeps the built-in bot set.
   env?: Env;
@@ -2071,9 +2076,15 @@ export function derivePublicCommentMergeFacts(args: {
     isGuardrailHit(changedPathsForGuardrail(args.unifiedFiles), resolveHardGuardrailGlobs(args.settings)) || manualReviewLabelPresent;
   const repoOwner = args.repoFullName.includes("/") ? args.repoFullName.slice(0, args.repoFullName.indexOf("/")) : "";
   const authorLogin = args.authorLogin ?? "";
+  const authorIsOwner = authorLogin.length > 0 && authorLogin.toLowerCase() === repoOwner.toLowerCase();
+  // Match the planner's real close-eligibility formula (agent-actions.ts / closeWithheldReason): an owner OR a
+  // per-repo admin author is close-PROTECTED unless the repo explicitly opts into closeOwnerAuthors. The old
+  // owner-only check both missed admin authors and ignored closeOwnerAuthors, so the public comment could claim
+  // neverClosed for a PR the planner would actually close (closeOwnerAuthors=true), or drop the claim for an
+  // admin author the planner protects (#8683).
   const neverClosed =
-    (authorLogin.length > 0 && authorLogin.toLowerCase() === repoOwner.toLowerCase()) ||
-    isProtectedAutomationAuthor(args.authorLogin, args.env);
+    isProtectedAutomationAuthor(args.authorLogin, args.env) ||
+    ((authorIsOwner || (args.authorIsAdmin ?? false)) && args.settings.closeOwnerAuthors !== true);
   return { ciState, mergeStateLabel, mergeReadiness, heldForReview, neverClosed };
 }
 
@@ -11154,6 +11165,10 @@ async function maybePublishPrPublicSurface(
       // The stored pr.mergeableState lags GitHub's async recompute, and the gate's own check/review publication can
       // also advance mergeability after readiness ran, so refresh at this post-publish boundary.
       const liveMergeState = await refreshLiveMergeState(env, repoFullName, webhook.liveFacts, pr.number, token, admissionKey).catch(() => undefined);
+      // Resolve per-repo admin status for the neverClosed close-eligibility formula (#8683): the same live per-repo
+      // permission check the planner and #4889 admin-mode use, so an admin (non-owner) author is close-protected
+      // exactly as the owner is.
+      const publicCommentAuthorIsAdmin = await isPerTenantAdmin(env, installationId, repoFullName, pr.authorLogin ?? "");
       const { ciState, mergeStateLabel, mergeReadiness, heldForReview, neverClosed } = derivePublicCommentMergeFacts({
         liveMergeState,
         mergeableState: pr.mergeableState,
@@ -11163,6 +11178,7 @@ async function maybePublishPrPublicSurface(
         unifiedFiles,
         repoFullName,
         prLabels: pr.labels,
+        authorIsAdmin: publicCommentAuthorIsAdmin,
         env,
       });
       // The public comment must match the authoritative Gate check-run conclusion.
