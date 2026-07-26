@@ -34,8 +34,10 @@ export type RemediationPlanInput = {
   }>;
 };
 
-const FORBIDDEN_PATTERN =
-  /\b(reward\w*|wallet|hotkey|coldkey|mnemonic|farming|payout|ranking|raw[-_\s]?trust|trust[-_\s]?score|private[-_\s]?reviewability|reviewability|private[-_\s]?scoreability|scoreability|score\w*|token[-_\s]?gate|token[-_\s]?score|base[-_\s]?score|multiplier|eligibility)\b|\/Users\/|\/home\/|\/tmp\/|[A-Z]:[\\/]Users[\\/]/i;
+// Exported so the redaction word-list itself is directly unit-testable (the sibling `sanitizePublicComment`
+// pass can mask it end-to-end): this is the second-line public-safety guard in `publicSafeText`.
+export const FORBIDDEN_PATTERN =
+  /\b(reward\w*|wallet|hotkey|coldkey|mnemonic|farming|payout|rankings?|raw[-_\s]?trust|trust[-_\s]?score|private[-_\s]?reviewability|reviewability|private[-_\s]?scoreability|scoreability|score\w*|token[-_\s]?gate|token[-_\s]?score|base[-_\s]?score|multiplier|eligibility)\b|\/Users\/|\/home\/|\/tmp\/|[A-Z]:[\\/]Users[\\/]/i;
 
 const SOURCE_PRIORITY: Record<RemediationPlanSource, number> = {
   account_state: 0,

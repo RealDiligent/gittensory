@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRemediationPlan } from "../../src/services/remediation-plan";
+import { buildRemediationPlan, FORBIDDEN_PATTERN } from "../../src/services/remediation-plan";
 
 const FORBIDDEN = /\b(wallet|hotkey|coldkey|mnemonic|farming|payout|raw[-_\s]?trust|score\w*|scoreability|token[-_\s]?score|base[-_\s]?score)\b/i;
 
@@ -204,6 +204,16 @@ describe("buildRemediationPlan", () => {
       expect.objectContaining({ source: "submission_readiness", step: "Resolve submission readiness blockers before submission." }),
     ]);
     expect(plan.recommendedRerunCondition).toMatch(/branch, base, or PR state changes/i);
+  });
+
+  it("FORBIDDEN_PATTERN catches the PLURAL 'rankings', not just the singular 'ranking' (#8886)", () => {
+    // `\branking\b` can never match inside "rankings" (no word boundary between "g" and "s"), so the plural
+    // leaked through this second-line guard while every sibling term (reward\w*, score\w*) already handled it.
+    // `rankings?` closes the gap; the singular must still match.
+    expect(FORBIDDEN_PATTERN.test("this shows the rankings of contributors")).toBe(true);
+    expect(FORBIDDEN_PATTERN.test("the ranking of this contributor")).toBe(true);
+    // A benign line with no forbidden term stays clear (guards against an over-broad edit).
+    expect(FORBIDDEN_PATTERN.test("Rerun after the base branch is refreshed.")).toBe(false);
   });
 
   it("uses neutral submission-readiness rerun conditions and medium impact for generic score blockers", () => {
