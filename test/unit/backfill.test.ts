@@ -468,6 +468,37 @@ describe("GitHub backfill", () => {
     expect(stored.some((l) => l.name === "label-p2-0")).toBe(true);
   });
 
+  it("bounds syncLabels: a pathological always-next-page /labels response stops at LABELS_MAX_PAGES and reports the segment capped (#8890)", async () => {
+    const env = createTestEnv({ GITHUB_PUBLIC_TOKEN: "public-token" });
+    await seedInstalledAndRegisteredRepo(env);
+    let labelCalls = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === "https://api.github.com/graphql") return githubTotalsResponse({ openIssues: 0, openPullRequests: 0, mergedPullRequests: 0, closedPullRequests: 0, labels: 5000 });
+      if (url.endsWith("/repos/JSONbored/gittensory")) {
+        return Response.json({ name: "gittensory", full_name: "JSONbored/gittensory", private: false, default_branch: "main", owner: { login: "JSONbored" } });
+      }
+      if (url.includes("/labels?")) {
+        labelCalls += 1;
+        // ALWAYS advertise a next page (with a distinct page number so no seen-guard trips first) — only the
+        // page cap can stop this loop.
+        const page = Number(new URL(url).searchParams.get("page") ?? "1");
+        return Response.json([{ name: `label-p${page}`, color: "aaaaaa" }], {
+          headers: { link: `<https://api.github.com/repositories/1/labels?page=${page + 1}>; rel="next"` },
+        });
+      }
+      return Response.json([]);
+    });
+
+    const result = await backfillRegisteredRepositories(env);
+
+    expect(labelCalls).toBe(10); // LABELS_MAX_PAGES — the loop cannot exceed the cap, not merely a mocked hasNextPage:false
+    expect(await listRepoSyncSegments(env, "JSONbored/gittensory")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ segment: "labels", status: "capped" })]),
+    );
+    expect(result.repos[0]?.warnings.join("\n")).toMatch(/Label sync hit the 10-page fetch cap/);
+  });
+
   it("refreshes contributor activity from GitHub search counts for registered repos", async () => {
     const env = createTestEnv({ GITHUB_PUBLIC_TOKEN: "public-token" });
     await seedRegisteredRepo(env);

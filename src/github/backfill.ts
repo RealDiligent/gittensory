@@ -1787,7 +1787,7 @@ async function supplementOpenIssuesFromGraphQl(env: Env, repo: RepositoryRecord,
   const admissionKey = repoAdmissionKeyForToken(env, repo, token);
   let after = "";
   let supplemented = 0;
-  for (;;) {
+  for (let page = 1; page <= OPEN_STATE_SUPPLEMENT_MAX_PAGES; page += 1) {
     const query = `query LoopOverOpenIssuesSupplement {
       repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
         issues(states: OPEN, first: 100${after}) {
@@ -1842,7 +1842,7 @@ async function supplementOpenPullRequestsFromGraphQl(env: Env, repo: RepositoryR
   const admissionKey = repoAdmissionKeyForToken(env, repo, token);
   let after = "";
   let supplemented = 0;
-  for (;;) {
+  for (let page = 1; page <= OPEN_STATE_SUPPLEMENT_MAX_PAGES; page += 1) {
     const query = `query LoopOverOpenPullRequestsSupplement {
       repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
         pullRequests(states: OPEN, first: 100${after}, orderBy: { field: CREATED_AT, direction: ASC }) {
@@ -2363,6 +2363,11 @@ async function fetchAndStorePullRequestDetails(
 // undefined (the caller can fall back to GraphQL); a later-page failure keeps the pages already fetched
 // rather than dropping a successful first page.
 const PR_DETAIL_MAX_PAGES = 10;
+// #8890: bound the three previously-unbounded pagination loops (syncLabels + the two open-state GraphQL
+// supplements) so a pathological repo can't turn one call into an unbounded fetch loop -- matching the 10-page
+// convention every other pagination loop in this file already uses.
+const LABELS_MAX_PAGES = 10;
+const OPEN_STATE_SUPPLEMENT_MAX_PAGES = 10;
 
 async function githubPaginatedList<T>(
   env: Env,
@@ -4403,18 +4408,23 @@ async function syncLabels(
   const items: GitHubLabelPayload[] = [];
   const admissionKey = repoAdmissionKeyForToken(env, repo, token);
   try {
-    for (let page = 1; ; page += 1) {
+    let capped = false;
+    for (let page = 1; page <= LABELS_MAX_PAGES; page += 1) {
       const result = await githubJsonWithHeaders<GitHubLabelPayload[]>(env, repo.fullName, `/labels?per_page=100&page=${page}`, token, githubRateLimitOptions(admissionKey));
       items.push(...result.data);
       if (!hasNextPage(result.link)) break;
+      // #8890: a pathological repo that always advertises a next page must not loop unboundedly -- stop at the
+      // page cap and surface it as `capped`, the same way githubPaged's bounded loops do.
+      if (page === LABELS_MAX_PAGES) capped = true;
     }
+    const cappedWarnings = capped ? [`Label sync hit the ${LABELS_MAX_PAGES}-page fetch cap; some labels may be missing.`] : [];
     const segment = await completeSegment(env, repo, "labels", sourceKind, mode, startedAt, {
-      status: "complete",
+      status: capped ? "capped" : "complete",
       fetchedCount: items.length,
       expectedCount: items.length,
-      warnings: [],
+      warnings: cappedWarnings,
     });
-    return { items, warnings: [], segment };
+    return { items, warnings: cappedWarnings, segment };
   } catch (error) {
     const warning = `Label sync failed: ${errorMessage(error)}`;
     const segment = await completeSegment(env, repo, "labels", sourceKind, mode, startedAt, {
