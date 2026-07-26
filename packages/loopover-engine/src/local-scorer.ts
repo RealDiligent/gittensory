@@ -9,6 +9,7 @@
 // moving the large, Node-coupled local-branch.ts; they are structurally identical to local-branch.ts's
 // definitions. isCodeFile/isTestPath are the same portable classifiers local-branch.ts already delegates to.
 
+import { DEFAULT_SCORING_CONSTANTS } from "./scoring/model.js";
 import { isCodeFile, isTestPath } from "./signals/test-evidence.js";
 
 export type LocalScorerChangedFile = {
@@ -50,8 +51,14 @@ export function computeLocalScorerTokens(input: { changedFiles: LocalScorerChang
   const files = input.changedFiles.filter((file) => !file.binary);
   const testTokenScore = files.filter((file) => isTestPath(file.path)).reduce((sum, file) => sum + fileLines(file), 0);
   const sourceTokenScore = files.filter((file) => isCodeFile(file.path)).reduce((sum, file) => sum + fileLines(file), 0);
-  const totalTokenScore = files.reduce((sum, file) => sum + fileLines(file), 0);
-  const nonCodeTokenScore = Math.max(0, totalTokenScore - sourceTokenScore - testTokenScore);
+  const rawTotalLines = files.reduce((sum, file) => sum + fileLines(file), 0);
+  const nonCodeTokenScore = Math.max(0, rawTotalLines - sourceTokenScore - testTokenScore);
+  // Weight test-file tokens at TEST_FILE_CONTRIBUTION_WEIGHT (#8875), mirroring buildScorePreview's own
+  // derivation (preview.ts computeScoreCore). A raw line sum fed back in via `localScorer` was honoured as-is
+  // by preview.ts and bypassed the 0.05x test-file discount, over-counting test-heavy diffs in the
+  // contribution-bonus ramp. sourceLines/nonCodeTokenScore keep using the raw line count, unchanged.
+  const testFileWeight = DEFAULT_SCORING_CONSTANTS.TEST_FILE_CONTRIBUTION_WEIGHT ?? 0.05;
+  const totalTokenScore = sourceTokenScore + testFileWeight * testTokenScore + nonCodeTokenScore;
   const failed = (input.validation ?? []).some((entry) => entry.status === "failed");
   const warnings = failed ? ["Local validation reported failures — token scores describe the diff, not a passing build."] : [];
   return {
@@ -59,7 +66,7 @@ export function computeLocalScorerTokens(input: { changedFiles: LocalScorerChang
     activeModel: "loopover-deterministic",
     sourceTokenScore,
     totalTokenScore,
-    sourceLines: Math.max(1, sourceTokenScore || totalTokenScore || 1),
+    sourceLines: Math.max(1, sourceTokenScore || rawTotalLines || 1),
     testTokenScore,
     nonCodeTokenScore,
     ...(warnings.length > 0 ? { warnings } : {}),
